@@ -1,4 +1,4 @@
-# NLR signature set — what each signature is, how they overlap, what they mean
+# NLR signature set: what each signature is, how they overlap, and what they mean
 
 The authoritative data is in three generated tables. This document explains them.
 
@@ -14,9 +14,9 @@ a given InterPro release. Current release: **InterPro 109.0**.
 
 Evidence base for every curated claim below:
 
-- **RefPlantNLR** — 481 experimentally validated plant NLRs with published subclass assignments
+- **RefPlantNLR**. 481 experimentally validated plant NLRs with published subclass assignments
   (PLOS Biology `pbio.3001124.s013`, Table S1). 481 of 481 identifiers matched exactly.
-- **A full *Nicotiana tabacum* proteome** — 75 127 proteins, used wherever RefPlantNLR was too
+- **A full *Nicotiana tabacum* proteome**. 75 127 proteins, used wherever RefPlantNLR was too
   narrow to decide.
 
 Full analysis, with the contingency tables:
@@ -65,7 +65,7 @@ out not to be interchangeable: `G3DSA:1.10.10.10` is 333/347 CC-NLR, `SSF46785` 
 |---|---:|---:|---|
 | `NB-ARC` | 5 | 11 | the anchor; never trimmed |
 | `PLOOP` | 1 | 2 | a bare P-loop, kept distinct so a degenerate NLR is not drawn as a full NB-ARC |
-| `TIR` | 1 | 6 | already saturated — 3 signatures each cover 105/105 TIR-NLRs |
+| `TIR` | 1 | 6 | already saturated: 3 signatures each cover 105/105 TIR-NLRs |
 | `CC` | 1 | 3 | the only true CC-domain signatures |
 | `RPW8` | 1 | 2 | |
 | `R1` | 1 | 1 | late blight resistance protein R1A-like N-terminal |
@@ -81,7 +81,7 @@ Raw signature coordinates overlap. Arbitration runs in this order, with NB-ARC (
 as the anchor:
 
 1. Build the NB-ARC region by merging P-loop, HD1, winged-helix and NB-ARC motif evidence.
-2. Truncate each N-terminal region — TIR, CC, RPW8, R1 — to end before the NB-ARC starts.
+2. Truncate each N-terminal region, meaning TIR, CC, RPW8 and R1, to end before the NB-ARC starts.
 3. Truncate the LRR to start after the NB-ARC ends.
 4. Truncate the C-JID to start after the LRR ends.
 5. Subtract every canonical region from the integrated-domain regions, splitting them if needed.
@@ -108,21 +108,21 @@ Classes sharing a `merge_group` collapse into one interval when they overlap, an
 |---|---|---|---|---|---:|---:|
 | `PF23559` | IPR058922 | WHD_DRP | NB-ARC (WHD) | **CC-NLR** | 351 | 952 |
 | `PF23282` | IPR058192 | WHD_ROQ1 | NB-ARC (WHD) | **TIR-NLR** | 99 | 166 |
-| `PF25895` | IPR058874 | WHD_plant_disease | NB-ARC (WHD) | — | 0 | 6 |
-| `PF23598` | IPR055414 | LRR_14 | LRR | — | 297 | 1064 |
+| `PF25895` | IPR058874 | WHD_plant_disease | NB-ARC (WHD) | n/a | 0 | 6 |
+| `PF23598` | IPR055414 | LRR_14 | LRR | n/a | 297 | 1064 |
 | `PF25019` | IPR056789 | LRR_R13L1-DRL21 | LRR | CC-NLR (supporting) | 80 | 68 |
 | `PF23247` | IPR057135 | LRR_RPS2 | LRR | **CCG10-NLR (gated)** | 21 | 18 |
 | `PF23286` | IPR058546 | LRR_13 | LRR | TIR-NLR (supporting) | 18 | 70 |
-| `cd21037` | IPR059179 | MLKL_NTD | MLKL | — | 1 | 38 |
-| `SSF47668` | IPR036537 | N-cbl / 4H bundle | MLKL | — | 0 | 0 |
+| `cd21037` | IPR059179 | MLKL_NTD | MLKL | n/a | 1 | 38 |
+| `SSF47668` | IPR036537 | N-cbl / 4H bundle | MLKL | n/a | 0 | 0 |
 
 ### Notes on individual entries
 
-**`PF23559` — the best CC marker in the set.** 98% purity, 99% coverage, beating `PF18052` at 85%.
+**`PF23559` is the best CC marker in the set.** 98% purity, 99% coverage, beating `PF18052` at 85%.
 It also hits 8/19 CCG10-NLRs, which is biologically consistent since CCG10 is a CC-lineage clade,
 and is the reason lineage-only evidence cannot separate CC-NLR from CCG10-NLR.
 
-**`PF23282` — diagnostic TIR-NLR**, 100% purity, 94% coverage. It adds nothing to TIR *detection*
+**`PF23282` is diagnostic for TIR-NLR**, at 100% purity and 94% coverage. It adds nothing to TIR *detection*
 (three existing signatures already cover 105/105) but it extends the NB-ARC over the WHD and is a
 clean lineage marker.
 
@@ -136,7 +136,7 @@ suppressed from the published GFF3 as noise while still contributing `REPEAT` ro
 TIR-NLRs and 3 RPW8-NLRs. It is region and extraction evidence only.
 
 **`PF25895` fires 6 times in 75 127 proteins and 0 times in RefPlantNLR.** It was nearly omitted on
-the RefPlantNLR evidence alone — a reminder that 481 curated proteins are a narrow corpus. Its
+the RefPlantNLR evidence alone, which is a reminder that 481 curated proteins are a narrow corpus. Its
 InterPro annotation describes exactly the intended role: a WHD "typically found C-terminal and
 adjacent to the NB-ARC domain IPR002182 […] characteristic of nucleotide-binding leucine-rich
 repeat (NLR) immune receptors in plants".
@@ -150,7 +150,7 @@ returns 0 across 75 127 plant proteins; the plant route runs through `cd21037` (
 `G3DSA:1.20.930.20` (36).
 
 **`PF06760` is the weak link in MLKL detection.** InterPro classifies it as `DUF1221` / IPR010632,
-*"Protein of unknown function"* — not MLKL. It fires 14 times against `cd21037`'s 38, so `cd21037`
+*"Protein of unknown function"*, not MLKL. It fires 14 times against `cd21037`'s 38, so `cd21037`
 leads the group.
 
 ---
@@ -163,7 +163,7 @@ codebase at all. `G3DSA:1.20.5.4220`, cited for CCG10 in earlier notes, **does n
 InterPro 108.0 or 109.0**.
 
 The obstacle is biological: **no CC domain is detectable in any CCG10-NLR.** All 19 in RefPlantNLR
-have a `Structure` of `NL` or `ONL` in Table S1 — no `C` — and 0/19 hit `PF18052`, `cd14798` or
+have a `Structure` of `NL` or `ONL` in Table S1, with no `C`, and 0/19 hit `PF18052`, `cd14798` or
 `G3DSA:1.20.5.4130`.
 
 `PF23247` (LRR_RPS2, named after RPS2, itself a G10-clade member) alone is a coin flip. Gating it
@@ -184,7 +184,7 @@ On RefPlantNLR it is 11/11 exact.
 
 An unbiased enrichment scan over all 231 signatures found no other CCG10 marker. The only
 CCG10-enriched hits are Ulp1 protease and ubiquitin-related domains (`SSF54001`, `PS50600`,
-`PF02902`, `G3DSA:3.30.310.130`, `G3DSA:1.10.418.20`, 4/19 each) — the integrated domains of the
+`PF02902`, `G3DSA:3.30.310.130`, `G3DSA:1.10.418.20`, 4/19 each). Those are the integrated domains of the
 four `Rpp1-R*` entries, so ID annotations rather than clade markers.
 
 ---
@@ -201,7 +201,7 @@ Every accession in the 1.x `case_when` chain was checked against InterPro 109.0.
 | **withdrawn from InterPro** | **0** |
 
 Nothing in a signature set frozen in 2021 has been withdrawn. The one accession that fails lookup
-is `CJID`, which is not an InterPro accession — it is the internal label for HMMER hits from the
+is `CJID`, which is not an InterPro accession. It is the internal label for HMMER hits from the
 Adachi HMM.
 
 **Name resolution simplified.** With InterProScan 6 TSV input, the signature description arrives in
@@ -214,8 +214,8 @@ a name supplied locally:
 That replaces most of the hardcoded fallback block in 1.x. The generator flags them as
 `needs_name_fallback = yes`.
 
-**Drift found.** `G3DSA:1.20.5.4130` is **unintegrated** in InterPro ≥ 108.0 — no entry, no
-description — so its local name is load-bearing and must stay. `cd14798` now integrates into
+**Drift found.** `G3DSA:1.20.5.4130` is **unintegrated** in InterPro 108.0 and later, with no entry
+and no description, so its local name carries the label and must stay. `cd14798` now integrates into
 `IPR038005` ("Virus X resistance protein-like, coiled-coil domain") rather than `IPR041118`.
 
 **Dead code found.** `PF18461` and `G3DSA:1.10.533.20` each appeared twice in the `case_when`
@@ -253,7 +253,7 @@ subclass evidence of any kind and is reported as `UNDETERMINED`.
 ### An explicit ambiguity beats a confident guess
 
 The first implementation reported a bare `CC-NLR` whenever `PF23559` was present without a
-detectable CC domain. **7 of those 23 calls were actually CCG10-NLRs** — a 30% error rate, for the
+detectable CC domain. **7 of those 23 calls were actually CCG10-NLRs**, a 30% error rate, for the
 reason in section 1. Those calls now report `CC-NLR or CCG10-NLR`, which moved 20 calls from wrong
 to honestly uncertain and took the wrong count from 18 to 1.
 
@@ -263,7 +263,7 @@ to honestly uncertain and took the wrong count from 18 to 1.
 
 - **CCG10-NLR coverage is 11/19.** The remaining 8 carry `PF23559` but not `PF23247`, so they land
   in `CC-NLR or CCG10-NLR`. Closing this needs a signature that does not yet exist.
-- **MLKL cannot be validated on RefPlantNLR** — it contains NLRs, not MLKLs. `cd21037` fires 38
+- **MLKL cannot be validated on RefPlantNLR**, because RefPlantNLR contains NLRs, not MLKLs. `cd21037` fires 38
   times in a real proteome, which is the only evidence available.
 - **`PF25895` rests on 6 observations.** Worth re-checking on more proteomes.
 - **CblN evidence is nearly absent** from RefPlantNLR (1 hit), so the CCR-NLR route via CblN is
