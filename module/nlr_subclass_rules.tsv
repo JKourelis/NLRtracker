@@ -1,0 +1,3 @@
+# Subclass rules that need more than one signature - consumed by module/R/04_classify.R
+rule	require_any	forbid_any	subclass	qualifier	notes
+ccg10_gated	PF23247	PF18052,cd14798	CCG10-NLR	probable	No CC domain is detectable in any CCG10-NLR; gate gives precision 100%, coverage 11/19
