@@ -1,0 +1,9 @@
+# Expected output for sample_data/sample.fasta — asserted by tests/run_tests.sh
+n_input_sequences	31
+n_classified	21
+n_regions	61
+subclass	CC-NLR	10
+subclass	CC-NLR or CCG10-NLR	5
+subclass	CCR-NLR	1
+subclass	TIR-NLR	3
+subclass	TX	2
