@@ -1,0 +1,13 @@
+# NB-ARC_region.hmm — LOCKED 2026-08-05
+# Do not rebuild without a deliberate decision. See docs/nbarc-hmm.md.
+name         NB-ARC_region
+model_length 382
+seed_n       471   # RefPlantNLR NB-ARC regions >=300aa (467) + 4 TNP outgroup
+seed_align   NB-ARC_region.seed.aln   # mafft --auto, staphb/mafft:latest
+built_with   hmmbuild --amino -n NB-ARC_region   (HMMER 3.4)
+hmm_cksum    2751930542
+sha256_hmm   ffb2008055d020d23cf650fc787c7d68ee968e64bd6d293d4748a69b0e8bbc66
+sha256_seed  a2ef01a34fba2fa5b87b94f45369d0cfca1b0049bc6a26869f0ca7befe86c313
+sha256_ref   c3fd6bf67707365f4cc4e643e04b9d5bbce8eab42103d32cf696a3d24342f303
+protein_ga   40   # is this an NLR? keeps all 481 RefPlantNLR (min 40.7), excludes AAA+/CDC48 (max 15.8)
+domain_ga    20   # where are the NB-ARCs? recovers RRS1 partial 2nd copy at score 36
