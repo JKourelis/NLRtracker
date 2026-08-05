@@ -145,7 +145,7 @@ if [[ ${FULL} -eq 1 ]]; then
     S1="${REFPLANTNLR_TABLE_S1:-}"
     if [[ -f "${S1}" ]] && command -v python3 >/dev/null 2>&1; then
       read -r ex am wr < <(python3 tests/score_refplantnlr.py "${tmp}/ref/NLRtracker.tsv" "${S1}")
-      check "exact agreement with published subclass" "453" "${ex}"
+      check "exact agreement with published subclass" "457" "${ex}"
       check "honestly ambiguous (contains the truth)" "23"  "${am}"
       check "wrong"                                   "1"   "${wr}"
     else

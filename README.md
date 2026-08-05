@@ -6,7 +6,7 @@ Give NLRtracker a protein FASTA file. It tells you which proteins are NLRs, whic
 belongs to, where every domain starts and stops, and how confident that subclass call is. It also
 extracts each domain as its own FASTA file and draws the domain architecture.
 
-Version 2.0.1 runs on InterProScan 6.0.1 and InterPro 109.0, so it now works on macOS and on Windows
+Version 2.0.2 runs on InterProScan 6.0.1 and InterPro 109.0, so it now works on macOS and on Windows
 under WSL2 as well as on Linux.
 
 ---
@@ -34,7 +34,7 @@ the tree and the domain architecture disagree.
 
 We tested it against the 481 NLRs in RefPlantNLR, whose subclasses were published independently.
 
-NLRtracker gets 453 of them exactly right. For 23 more it reports an honest ambiguity that contains
+NLRtracker gets 457 of them exactly right. For 23 more it reports an honest ambiguity that contains
 the right answer, for example "CC-NLR or CCG10-NLR" when the evidence genuinely cannot separate the
 two. One call in 481 is wrong.
 
@@ -454,6 +454,19 @@ If you use NLRtracker, please cite:
 ---
 
 ## Version history
+
+### 2.0.2
+
+**The reported accuracy was understated, and is now correct: 457 of 481, not 453.**
+
+The scoring script compared its own identifiers against the published Table S1 without applying
+the same normalisation the pipeline applies. InterProScan strips `/` from sequence names, so
+`Bph1/9-1` becomes `Bph19-1`, and the four Bph1/9 alleles therefore matched nothing in Table S1
+and were dropped from the score without a word. The totals covered 477 proteins while appearing
+to cover 481.
+
+All four were called correctly the whole time. Exact agreement is 457 of 481, or 95.0 per cent,
+with 23 honest ambiguities and 1 wrong call. No classification changed.
 
 ### 2.0.1
 

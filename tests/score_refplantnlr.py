@@ -60,7 +60,12 @@ def read_table_s1(path):
         if len(r) > max(i_id, i_sub) and r[i_id]:
             parts = [p for p in r[i_sub].split(";") if p]
             if len(parts) > 1:
-                out[r[i_id]] = parts[1]
+                # Normalise the identifier exactly as the pipeline does. InterProScan strips
+                # '/' from sequence names, so Table S1's "Bph1/9-1" has to become "Bph19-1"
+                # to match. Without this the four Bph1/9 alleles never matched anything and
+                # were silently dropped from the score, so the totals covered 477 proteins
+                # while appearing to cover 481.
+                out[r[i_id].replace("/", "")] = parts[1]
     return out
 
 

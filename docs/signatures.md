@@ -232,7 +232,7 @@ lack an NB-ARC.
 
 | | n | share |
 |---|---:|---:|
-| exact | **453** / 481 | **94.2%** |
+| exact | **457** / 481 | **95.0%** |
 | ambiguous call containing the truth | 23 | 4.8% |
 | **wrong** | **1** | **0.2%** |
 
