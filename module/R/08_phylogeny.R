@@ -91,9 +91,29 @@ make_tip_map <- function(ids) {
   tibble::tibble(id = ids, tip = sprintf("t%06d", seq_along(ids)))
 }
 
+## Quote a label for Newick when it contains a reserved character, doubling any single quote.
+## A label that needs no quoting is left bare, so ordinary identifiers stay readable.
+newick_label <- function(x) {
+  needs <- grepl("[][(){},:;'[:space:]]", x)
+  ifelse(needs, paste0("'", gsub("'", "''", x, fixed = TRUE), "'"), x)
+}
+
 ## ------------------------------------------------------------------ tree
 
-build_tree <- function(aln, out_tree, threads = 8) {
+## `threads` defaults to 1, deliberately.
+##
+## VeryFastTree 4.0.5 is not reproducible above one thread, and on this data it also returns a
+## much worse tree. Measured on the 507-tip RefPlantNLR scaffold, each thread count run twice:
+##
+##   threads 1     6 of 414 splits reported bad    reproducible       2.71 s
+##   threads 2   401 of 414 splits reported bad    not reproducible   1.96 s
+##   threads 4   378 of 414 splits reported bad    not reproducible   1.42 s
+##   threads 8   378 of 414 splits reported bad    not reproducible   1.47 s
+##
+## The whole saving is about 1.2 seconds, against a tree that changes between runs and is
+## poorly resolved. Clade assignment survived the difference, because the quorum rule tolerates
+## local rearrangement, but a tree that cannot be reproduced is not one to publish a figure from.
+build_tree <- function(aln, out_tree, threads = 1) {
   st <- system2("VeryFastTree",
                 c("-lg", "-gamma", "-pseudo", "-quiet", "-threads", threads, shQuote(aln)),
                 stdout = out_tree, stderr = FALSE)
@@ -277,7 +297,7 @@ categorise <- function(arch_subclass, clade, clade_path, n_nbarc, n_discordant) 
 ## ------------------------------------------------------------------ entry point
 
 run_phylogeny <- function(outdir, classification, regions, aa, cfg, clades_path,
-                          reference_dir, threads = 8) {
+                          reference_dir, threads = 1) {
   for (tool in c("hmmalign", "VeryFastTree")) {
     if (nchar(Sys.which(tool)) == 0) {
       message("[R]   ", tool, " not found - skipping phylogeny"); return(NULL)
@@ -319,12 +339,24 @@ run_phylogeny <- function(outdir, classification, regions, aa, cfg, clades_path,
 
   message("[R]   building tree")
   tp <- build_tree(safe_aln, file.path(pdir, "NB-ARC.tree"), threads)
+  raw_newick <- paste(readr::read_lines(tp, progress = FALSE), collapse = "")
   tree <- ape::read.tree(tp)
   back <- setNames(tipmap$id, tipmap$tip)
   tree$tip.label <- unname(back[tree$tip.label])
   if (anyNA(tree$tip.label)) stop("tip name mapping lost a label", call. = FALSE)
-  ## rewrite the tree with real names so the published file is usable
-  ape::write.tree(tree, file.path(pdir, "NB-ARC.tree"))
+  ## Publish the tree by substituting real names into VeryFastTree's own output, rather than
+  ## by re-writing the parsed tree.
+  ##
+  ## ape::write.tree() sanitises tip labels, and it does so silently: "Bph19-1_(1)" comes back
+  ## as "Bph19-1_-1". That breaks the join from the published tree to NLRtracker.tsv, and it
+  ## breaks it for exactly the proteins carrying duplicated NB-ARC domains -- Bph19, Pib, RGA2,
+  ## Prv -- which are the interesting ones. Substituting into the raw Newick also preserves the
+  ## SH-like support values and branch-length precision as VeryFastTree emitted them, instead of
+  ## round-tripping them through a parser.
+  for (i in seq_len(nrow(tipmap))) {
+    raw_newick <- gsub(tipmap$tip[i], newick_label(tipmap$id[i]), raw_newick, fixed = TRUE)
+  }
+  readr::write_lines(raw_newick, tp)
   unlink(safe_aln)
   message("[R]     ", length(tree$tip.label), " tips")
 

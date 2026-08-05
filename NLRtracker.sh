@@ -8,7 +8,7 @@
 #
 set -euo pipefail
 
-VERSION="2.0.0"
+VERSION="2.0.1"
 INTERPROSCAN_REVISION="6.0.1"
 INTERPRO_VERSION="109.0"
 

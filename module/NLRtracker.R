@@ -154,7 +154,7 @@ if (isTRUE(args[["phylogeny"]]) || identical(opt("phylogeny"), "true")) {
   phylo <- run_phylogeny(outdir, classification, regions, aa, cfg,
                          clades_path   = file.path(here, "nlr_clades.tsv"),
                          reference_dir = file.path(here, "reference"),
-                         threads       = as.integer(dplyr::coalesce(opt("threads"), "8")))
+                         threads       = as.integer(dplyr::coalesce(opt("threads"), "1")))
 }
 
 message("[R] writing report")

@@ -6,7 +6,7 @@ Give NLRtracker a protein FASTA file. It tells you which proteins are NLRs, whic
 belongs to, where every domain starts and stops, and how confident that subclass call is. It also
 extracts each domain as its own FASTA file and draws the domain architecture.
 
-Version 2.0.0 runs on InterProScan 6.0.1 and InterPro 109.0, so it now works on macOS and on Windows
+Version 2.0.1 runs on InterProScan 6.0.1 and InterPro 109.0, so it now works on macOS and on Windows
 under WSL2 as well as on Linux.
 
 ---
@@ -454,6 +454,34 @@ If you use NLRtracker, please cite:
 ---
 
 ## Version history
+
+### 2.0.1
+
+Two fixes to the optional phylogeny step. Nothing else changed, and classification is
+untouched.
+
+**Tip names in `phylogeny/NB-ARC.tree` are no longer corrupted.** `ape::write.tree` sanitises
+labels silently, so `Bph19-1_(1)` came out as `Bph19-1_-1`. Names in the published tree could
+therefore not be joined back to `NLRtracker.tsv`, and it affected exactly the proteins carrying
+duplicated NB-ARC domains: Bph19, Pib, RGA2 and Prv. The tree is now published by substituting
+quoted names into VeryFastTree's own output, so the file is what the tree program wrote with the
+identifiers put back.
+
+**Tree building now uses one thread by default.** VeryFastTree 4.0.5 is not reproducible above
+one thread, and on this data it also returns a much worse tree. Each thread count run twice on
+the 507-tip reference scaffold:
+
+| Threads | Splits reported bad | Reproducible | Time |
+|---:|---:|---|---:|
+| 1 | 6 of 414 | yes | 2.71 s |
+| 2 | 401 of 414 | no | 1.96 s |
+| 4 | 378 of 414 | no | 1.42 s |
+| 8 | 378 of 414 | no | 1.47 s |
+
+The whole saving was 1.2 seconds. Pass `--threads` to `module/NLRtracker.R` to raise it if a
+very large query set needs it, and record the value you used.
+
+If you built a tree with 2.0.0, rebuild it.
 
 ### 2.0.0
 
