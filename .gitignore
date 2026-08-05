@@ -1,0 +1,28 @@
+# Working material — not part of the released tool
+PROMPTS/
+ROADMAP/
+RESEARCH/
+dev/
+
+# Tool caches and run artefacts
+.nextflow/
+.nextflow.log*
+work/
+__pycache__/
+*.pyc
+.Rhistory
+.RData
+.Rproj.user/
+
+# Pipeline output
+out/
+out_*/
+*.domtblout
+!sample_data/*.domtblout
+
+# The reference copy of the 1.x script is kept for the signature-table generator,
+# but its editor backups are not
+module/NLRtracker.legacy.R.bak
+*.bak
+*~
+dev
