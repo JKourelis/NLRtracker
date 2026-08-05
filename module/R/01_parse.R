@@ -18,7 +18,12 @@ IPS6_COLS <- c("seqname", "md5", "seq_length", "analysis", "signature", "sig_des
 normalise_id <- function(x) stringr::str_replace_all(x, "/", "")
 
 read_interproscan <- function(path, cfg, seqtype = "p") {
-  raw <- readr::read_tsv(path, col_names = IPS6_COLS, col_types = readr::cols(
+  ## quote = "" for the same reason as in 00_config.R: InterPro descriptions contain bare
+  ## double quotes. IPR036390 is '"Winged helix" DNA-binding domain', and with readr's
+  ## default quoting the quotes are silently stripped from column 6, so SSF46785 was named
+  ## 'Winged helix DNA-binding domain'. A field with an ODD number of quotes would shift
+  ## the columns instead of merely losing a character.
+  raw <- readr::read_tsv(path, col_names = IPS6_COLS, quote = "", col_types = readr::cols(
     .default = readr::col_character(), start = readr::col_integer(),
     end = readr::col_integer(), seq_length = readr::col_integer()),
     progress = FALSE, na = character())
@@ -68,7 +73,7 @@ read_interproscan <- function(path, cfg, seqtype = "p") {
 }
 
 read_fimo <- function(path) {
-  raw <- readr::read_tsv(path, col_names = FALSE, comment = "#",
+  raw <- readr::read_tsv(path, col_names = FALSE, comment = "#", quote = "",
                          col_types = readr::cols(.default = readr::col_character()),
                          progress = FALSE, na = character())
   if (nrow(raw) == 0) stop("FIMO output is empty: ", path, call. = FALSE)
