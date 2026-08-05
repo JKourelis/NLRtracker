@@ -26,3 +26,6 @@ module/NLRtracker.legacy.R.bak
 *.bak
 *~
 dev
+
+# Stray run logs. Two from 2021 were committed by accident.
+log/
