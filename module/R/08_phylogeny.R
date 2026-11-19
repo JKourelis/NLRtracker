@@ -17,7 +17,7 @@
 PHYLO_MIN_OCCUPANCY <- 0.50   # fraction of match-state columns a tip must cover to enter the tree
 PHYLO_MAX_FOREIGN   <- 0.20   # report (not reject) a clade subtree containing this many foreign anchors
 PHYLO_MAX_SPAN      <- 0.90   # reject a clade whose MRCA spans this share of the reference set
-PHYLO_ANCHOR_QUORUM <- 0.90   # majority-rule MRCA: smallest node holding this share of anchors
+PHYLO_ANCHOR_QUORUM <- 1.00   # anchors bind: smallest node holding ALL declared anchors
 PHYLO_MAX_COPHEN    <- 8000   # tips above which the full patristic matrix is not built
 
 ## ------------------------------------------------------------------ helpers
@@ -114,11 +114,17 @@ newick_label <- function(x) {
 ## poorly resolved. Clade assignment survived the difference, because the quorum rule tolerates
 ## local rearrangement, but a tree that cannot be reproduced is not one to publish a figure from.
 build_tree <- function(aln, out_tree, threads = 1) {
-  st <- system2("VeryFastTree",
-                c("-lg", "-gamma", "-pseudo", "-quiet", "-threads", threads, shQuote(aln)),
-                stdout = out_tree, stderr = FALSE)
+  prog <- if (nzchar(Sys.which("VeryFastTree"))) "VeryFastTree" else
+          if (nzchar(Sys.which("FastTree"))) "FastTree" else ""
+  if (!nzchar(prog)) stop("neither VeryFastTree nor FastTree found", call. = FALSE)
+  args <- if (prog == "VeryFastTree") {
+    c("-lg", "-gamma", "-pseudo", "-quiet", "-threads", threads, shQuote(aln))
+  } else {
+    c("-lg", "-gamma", "-pseudo", "-quiet", shQuote(aln))
+  }
+  st <- system2(prog, args, stdout = out_tree, stderr = FALSE)
   if (!identical(st, 0L) || !file.exists(out_tree) || file.size(out_tree) == 0) {
-    stop("VeryFastTree failed", call. = FALSE)
+    stop(prog, " failed", call. = FALSE)
   }
   out_tree
 }
@@ -129,19 +135,23 @@ build_tree <- function(aln, out_tree, threads = 1) {
 ## than one. Strip it to recover the protein.
 tip_to_protein <- function(x) sub("_\\((\\d+)\\)$", "", x)
 
+## Match curated clade-table anchors (protein names, possibly containing "/") to tree tip
+## labels (normalised identifiers, possibly carrying "_(n)" tandem-copy suffixes).
+anchor_tips <- function(anchor_list, tip_labels) {
+  if (length(anchor_list) == 0L || length(tip_labels) == 0L) return(character())
+  tip_proteins <- tip_to_protein(tip_labels)
+  want <- unique(normalise_id(trimws(anchor_list)))
+  want <- want[nzchar(want)]
+  tip_labels[tip_proteins %in% want]
+}
+
 load_clades <- function(path) {
   read_tsv_config(path, "clade table") %>%
     mutate(anchor_list = strsplit(dplyr::coalesce(anchors, ""), ",", fixed = TRUE))
 }
 
-## For every anchored clade: the smallest subtree holding most of its anchors, the tips
+## For every anchored clade: the smallest subtree holding all its anchors, the tips
 ## beneath it, and how many anchors of other clades it contains.
-##
-## A strict MRCA of every anchor is far too fragile at this scale. CC-NLR has 352 anchors and
-## a single misplaced one drags the MRCA to the root -- observed: its subtree covered >90% of
-## the reference set, so the clade had to be discarded and CC-01/CC-02 could not be derived.
-## A majority-rule MRCA (the smallest node containing at least PHYLO_ANCHOR_QUORUM of the
-## anchors) tolerates a few stray anchors, which is normal in a single-gene tree.
 clade_subtrees <- function(tree, clades, ref_ids) {
   ntip <- length(tree$tip.label)
   ## descendant tip sets for every internal node, computed once
@@ -151,7 +161,7 @@ clade_subtrees <- function(tree, clades, ref_ids) {
 
   anchor_of <- list()
   for (i in seq_len(nrow(clades))) {
-    anchor_of[[clades$clade[i]]] <- intersect(clades$anchor_list[[i]], tree$tip.label)
+    anchor_of[[clades$clade[i]]] <- anchor_tips(clades$anchor_list[[i]], tree$tip.label)
   }
   all_anchors <- unlist(anchor_of)
 
@@ -189,7 +199,7 @@ clade_subtrees <- function(tree, clades, ref_ids) {
 derive_cc_split <- function(tree, sub, clades) {
   anchors_for <- function(nm) {
     i <- match(nm, clades$clade)
-    if (is.na(i)) character() else intersect(clades$anchor_list[[i]], tree$tip.label)
+    if (is.na(i)) character() else anchor_tips(clades$anchor_list[[i]], tree$tip.label)
   }
   nrc <- union(anchors_for("CC-01-NRCh"), anchors_for("CC-01-NRC-sensor"))
   mla <- anchors_for("CC-02-MLA")
@@ -236,12 +246,15 @@ nearest_reference <- function(tree, query_tips, ref_tips, k = 4) {
     d <- d[query_tips, ref_tips, drop = FALSE]
     purrr::map_dfr(seq_len(nrow(d)), function(i) {
       o <- order(d[i, ])
+      nxt <- if (length(o) >= 2L && k >= 2L) {
+        idx <- o[2:min(k, length(o))]
+        paste(sprintf("%s(%.3f)", colnames(d)[idx], d[i, idx]), collapse = ", ")
+      } else ""
       tibble::tibble(
         tip = rownames(d)[i],
         nearest_ref = colnames(d)[o[1]],
         nearest_dist = round(unname(d[i, o[1]]), 4),
-        next_refs = paste(sprintf("%s(%.3f)", colnames(d)[o[2:min(k, length(o))]],
-                                  d[i, o[2:min(k, length(o))]]), collapse = ", "))
+        next_refs = nxt)
     })
   } else {
     ## Too many tips for a full matrix. Walk up from each query until a reference appears in
@@ -260,10 +273,13 @@ nearest_reference <- function(tree, query_tips, ref_tips, k = 4) {
           sub <- ape::keep.tip(tree, unique(c(q, hit)))
           d <- ape::cophenetic.phylo(sub)[q, hit, drop = TRUE]
           o <- order(d)
+          nxt <- if (length(o) >= 2L && k >= 2L) {
+            idx <- o[2:min(k, length(o))]
+            paste(sprintf("%s(%.3f)", names(d)[idx], d[idx]), collapse = ", ")
+          } else ""
           return(tibble::tibble(
             tip = q, nearest_ref = names(d)[o[1]], nearest_dist = round(unname(d[o[1]]), 4),
-            next_refs = paste(sprintf("%s(%.3f)", names(d)[o[2:min(k, length(o))]],
-                                      d[o[2:min(k, length(o))]]), collapse = ", ")))
+            next_refs = nxt))
         }
         node <- parent
       }
@@ -279,11 +295,12 @@ ARCH_TO_CLADE <- c(
   "CCG10-NLR" = "CCG10-NLR", "CCG10-NLR (probable)" = "CCG10-NLR"
 )
 
-categorise <- function(arch_subclass, clade, clade_path, n_nbarc, n_discordant) {
+categorise <- function(arch_subclass, clade, clade_path, n_nbarc, n_discordant, basis = "") {
   amb <- is.na(arch_subclass) | arch_subclass == "UNDETERMINED" |
     grepl(" or ", arch_subclass, fixed = TRUE)
   mapped <- unname(ARCH_TO_CLADE[sub(" \\(probable\\)$", "", arch_subclass)])
   dplyr::case_when(
+    basis == "outgroup"                       ~ "outgroup",
     is.na(clade) | clade == "unplaced"        ~ "unplaced",
     n_discordant > 0                          ~ "multi_nbarc_discordant",
     amb                                       ~ "phylogeny_resolves",
@@ -298,10 +315,11 @@ categorise <- function(arch_subclass, clade, clade_path, n_nbarc, n_discordant) 
 
 run_phylogeny <- function(outdir, classification, regions, aa, cfg, clades_path,
                           reference_dir, threads = 1) {
-  for (tool in c("hmmalign", "VeryFastTree")) {
-    if (nchar(Sys.which(tool)) == 0) {
-      message("[R]   ", tool, " not found - skipping phylogeny"); return(NULL)
-    }
+  if (!nzchar(Sys.which("hmmalign"))) {
+    message("[R]   hmmalign not found - skipping phylogeny"); return(NULL)
+  }
+  if (!nzchar(Sys.which("VeryFastTree")) && !nzchar(Sys.which("FastTree"))) {
+    message("[R]   neither VeryFastTree nor FastTree found - skipping phylogeny"); return(NULL)
   }
   if (!requireNamespace("ape", quietly = TRUE)) {
     message("[R]   ape not installed - skipping phylogeny"); return(NULL)
@@ -318,14 +336,15 @@ run_phylogeny <- function(outdir, classification, regions, aa, cfg, clades_path,
 
   ## query NB-ARC regions, named exactly as the per-region FASTA names them
   nlr <- classification %>% filter(Status %in% c("NLR", "degenerate NLR")) %>% pull(seqname)
-  q <- region_fasta(regions %>% filter(seqname %in% nlr), aa, "NB-ARC")
-  if (nrow(q) < 2) { message("[R]   fewer than 2 query NB-ARC regions - skipping"); return(NULL) }
+  q_raw <- region_fasta(regions %>% filter(seqname %in% nlr), aa, "NB-ARC")
+  if (nrow(q_raw) < 2) { message("[R]   fewer than 2 query NB-ARC regions - skipping"); return(NULL) }
   ref <- read_fasta_simple(ref_fa)
-  ## a reference id colliding with a query id would corrupt the assignment
-  q <- q %>% rename(id = seqname, seq = sequence) %>% filter(!id %in% ref$id)
+  ## Keep non-colliding sequences for the FASTA, while retaining colliding query proteins
+  ## via their scaffold tips after tree construction.
+  q <- q_raw %>% rename(id = seqname, seq = sequence) %>% filter(!id %in% ref$id)
   combined <- file.path(pdir, "NB-ARC.input.fasta")
   write_fasta_simple(bind_rows(ref, q), combined)
-  message("[R]   ", nrow(ref), " reference + ", nrow(q), " query NB-ARC regions")
+  message("[R]   ", nrow(ref), " reference + ", nrow(q), " non-reference query NB-ARC regions")
 
   message("[R]   aligning to the NB-ARC profile")
   al <- align_to_profile(combined, hmm, file.path(pdir, "NB-ARC.aln"), protect = ref$id)
@@ -340,55 +359,74 @@ run_phylogeny <- function(outdir, classification, regions, aa, cfg, clades_path,
   message("[R]   building tree")
   tp <- build_tree(safe_aln, file.path(pdir, "NB-ARC.tree"), threads)
   raw_newick <- paste(readr::read_lines(tp, progress = FALSE), collapse = "")
-  tree <- ape::read.tree(tp)
+  tree_tok <- ape::read.tree(tp)
   back <- setNames(tipmap$id, tipmap$tip)
-  tree$tip.label <- unname(back[tree$tip.label])
-  if (anyNA(tree$tip.label)) stop("tip name mapping lost a label", call. = FALSE)
-  ## Publish the tree by substituting real names into VeryFastTree's own output, rather than
-  ## by re-writing the parsed tree.
-  ##
-  ## ape::write.tree() sanitises tip labels, and it does so silently: "Bph19-1_(1)" comes back
-  ## as "Bph19-1_-1". That breaks the join from the published tree to NLRtracker.tsv, and it
-  ## breaks it for exactly the proteins carrying duplicated NB-ARC domains -- Bph19, Pib, RGA2,
-  ## Prv -- which are the interesting ones. Substituting into the raw Newick also preserves the
-  ## SH-like support values and branch-length precision as VeryFastTree emitted them, instead of
-  ## round-tripping them through a parser.
+  real_tips <- unname(back[tree_tok$tip.label])
+  if (anyNA(real_tips)) stop("tip name mapping lost a label", call. = FALSE)
+  ## Publish the tree by substituting real names into the tree builder's own output, rather
+  ## than re-writing a parsed tree through ape::write.tree(), which corrupts "Bph19-1_(1)".
   for (i in seq_len(nrow(tipmap))) {
     raw_newick <- gsub(tipmap$tip[i], newick_label(tipmap$id[i]), raw_newick, fixed = TRUE)
   }
   readr::write_lines(raw_newick, tp)
   unlink(safe_aln)
-  message("[R]     ", length(tree$tip.label), " tips")
+  message("[R]     ", length(real_tips), " tips")
 
   cl <- load_clades(clades_path)
-  ref_ids <- intersect(ref$id, tree$tip.label)
+  ref_ids <- intersect(ref$id, real_tips)
 
-  ## root on the outgroup
-  og <- cl %>% filter(role == "outgroup") %>% pull(anchor_list) %>% unlist() %>%
-    intersect(tree$tip.label)
+  ## Root on the outgroup while tips are still opaque tokens, then write NB-ARC.rooted.tree
+  ## by substituting real names back into the rooted Newick string.
+  og_rows <- cl %>% filter(role == "outgroup")
+  outgroup_clade <- character()
+  for (i in seq_len(nrow(og_rows))) {
+    tips_i <- anchor_tips(og_rows$anchor_list[[i]], real_tips)
+    if (length(tips_i)) outgroup_clade[tips_i] <- og_rows$clade[i]
+  }
+  og <- names(outgroup_clade)
+  og_tok <- tipmap$tip[match(og, tipmap$id)]
+  og_tok <- og_tok[!is.na(og_tok)]
   rooted <- FALSE
-  if (length(og) >= 1) {
-    tree <- tryCatch({ t2 <- ape::root(tree, outgroup = og, resolve.root = TRUE)
-                       rooted <- TRUE; t2 },
-                     error = function(e) { message("[R]   rooting failed: ",
-                                                   conditionMessage(e)); tree })
+  if (length(og_tok) >= 1) {
+    tree_tok <- tryCatch({
+      t2 <- ape::root(tree_tok, outgroup = og_tok, resolve.root = TRUE, edgelabel = TRUE)
+      t2 <- ape::ladderize(t2)
+      rooted <- TRUE
+      t2
+    }, error = function(e) {
+      message("[R]   rooting failed: ", conditionMessage(e))
+      tree_tok
+    })
   }
   message("[R]   rooted on ", length(og), " outgroup tip(s): ", rooted)
+  if (rooted) {
+    if (!is.null(tree_tok$node.label) && length(tree_tok$node.label) != tree_tok$Nnode) {
+      tree_tok$node.label <- NULL
+    }
+    rooted_nwk <- ape::write.tree(tree_tok)
+    for (i in seq_len(nrow(tipmap))) {
+      rooted_nwk <- gsub(tipmap$tip[i], newick_label(tipmap$id[i]), rooted_nwk, fixed = TRUE)
+    }
+    rooted_tp <- file.path(pdir, "NB-ARC.rooted.tree")
+    readr::write_lines(rooted_nwk, rooted_tp)
+    message("[R]     rooted tree written to ", basename(rooted_tp))
+  }
+
+  tree <- tree_tok
+  tree$tip.label <- unname(back[tree$tip.label])
+  if (anyNA(tree$tip.label)) stop("rooted tip name mapping lost a label", call. = FALSE)
 
   sub <- clade_subtrees(tree, cl %>% filter(role == "anchored"), ref_ids)
 
-  ## A clade nesting inside another is expected, not pollution: CCG10 sits within the CC
-  ## lineage phylogenetically even though both are declared at the top level, and
-  ## "most specific containing clade" resolves that correctly on its own. So only reject a
-  ## clade whose MRCA spans essentially the whole reference set -- that means the MRCA
-  ## collapsed to the root and the clade would swallow everything. Purity is reported in
-  ## clade_summary.tsv either way rather than silently acted on.
   n_ref_total <- max(length(ref_ids), 1)
   bad <- names(sub)[vapply(sub, function(s)
     sum(s$tips %in% ref_ids) / n_ref_total > PHYLO_MAX_SPAN, logical(1))]
+  broad <- list()
   if (length(bad)) {
-    message("[R]   WARNING: MRCA spans >", round(100 * PHYLO_MAX_SPAN),
-            "% of the reference set, excluded: ", paste(bad, collapse = ", "))
+    message("[R]   spans >", round(100 * PHYLO_MAX_SPAN),
+            "% of the reference set, kept as lineage-level fallback: ",
+            paste(sort(bad), collapse = ", "))
+    broad <- sub[bad]
     sub <- sub[setdiff(names(sub), bad)]
   }
   low <- names(sub)[vapply(sub, function(s)
@@ -398,10 +436,6 @@ run_phylogeny <- function(outdir, classification, regions, aa, cfg, clades_path,
             paste(low, collapse = ", "))
   }
 
-  ## Only derive CC-01/CC-02 from the tree when they carry no anchors of their own. As of
-  ## 2026-08-05 they are curated (CC clade 1 = Ptr1/alpha-WOLF/Pm2/I2/R3a/Xa1, CC clade 2 =
-  ## NRC + MLA + ZAR1), which is what the tree had already shown by putting NRC and MLA in one
-  ## daughter. Curated anchors win; the derivation stays for datasets that lack them.
   cc_anchored <- cl %>% filter(clade %in% c("CC-01", "CC-02"), role == "anchored") %>% nrow()
   ccs <- if (cc_anchored == 2) list(ok = FALSE, why = "CC-01/CC-02 are curated, not derived")
          else derive_cc_split(tree, sub, cl)
@@ -412,9 +446,6 @@ run_phylogeny <- function(outdir, classification, regions, aa, cfg, clades_path,
                            recovered = NA, foreign_frac = 0)
     message("[R]   CC split derived: ", ccs$note)
   } else if (identical(ccs$why, "CC-01/CC-02 are curated, not derived")) {
-    ## The normal case. Curated anchors define CC-01 and CC-02, so deriving them from the
-    ## tree is neither needed nor wanted, and saying WARNING here trains the reader to
-    ## ignore the word.
     message("[R]   CC split: from curated anchors")
   } else {
     message("[R]   WARNING: CC-01/CC-02 not derivable - ", ccs$why)
@@ -423,28 +454,97 @@ run_phylogeny <- function(outdir, classification, regions, aa, cfg, clades_path,
   parent_of <- setNames(cl$parent, cl$clade)
   path_of <- function(nm) {
     p <- nm; out <- nm
-    while (!is.na(parent_of[p]) && parent_of[p] != "root") {
+    while (!is.na(parent_of[p]) && parent_of[p] != "root" && nzchar(parent_of[p])) {
       p <- parent_of[p]; out <- paste0(p, ">", out)
     }
     out
   }
+  lineage_of <- function(nm) {
+    p <- nm
+    while (!is.na(parent_of[p]) && parent_of[p] != "root" && nzchar(parent_of[p])) {
+      p <- parent_of[p]
+    }
+    p
+  }
 
   ## most specific containing clade = smallest subtree that holds the tip
   order_by_size <- names(sub)[order(vapply(sub, function(s) s$n_tips, numeric(1)))]
-  q_tips <- intersect(q$id, tree$tip.label)
-  assign_tip <- function(tp_) {
+  specific <- function(tp_) {
     for (nm in order_by_size) if (tp_ %in% sub[[nm]]$tips) return(nm)
     NA_character_
   }
-  tip_clade <- tibble::tibble(tip = q_tips,
-                              clade = vapply(q_tips, assign_tip, character(1)))
 
-  near <- nearest_reference(tree, q_tips, ref_ids)
+  q_tips <- intersect(q$id, tree$tip.label)
+  ref_by_protein <- split(ref_ids, tip_to_protein(ref_ids))
+  input_ref_tips <- ref_ids[tip_to_protein(ref_ids) %in% nlr & !(ref_ids %in% q_tips)]
+  all_tips <- c(q_tips, input_ref_tips)
+
+  informative <- ref_ids[vapply(ref_ids, function(t) !is.na(specific(t)), logical(1))]
+  needs_lineage <- all_tips[!(all_tips %in% names(outgroup_clade)) &
+                              vapply(all_tips, function(t) is.na(specific(t)), logical(1))]
+  lineage_near_map <- list()
+  if (length(needs_lineage) > 0 && length(broad) > 0 && length(informative) > 0) {
+    non_ref_need <- setdiff(needs_lineage, input_ref_tips)
+    if (length(non_ref_need) > 0) {
+      ln_df <- nearest_reference(tree, non_ref_need, informative, k = 1)
+      for (i in seq_len(nrow(ln_df))) lineage_near_map[[ln_df$tip[i]]] <- ln_df$nearest_ref[i]
+    }
+    ref_need <- intersect(needs_lineage, input_ref_tips)
+    for (tp_ in ref_need) {
+      own_tips <- ref_by_protein[[tip_to_protein(tp_)]]
+      cand_ref <- setdiff(informative, own_tips)
+      if (length(cand_ref) > 0) {
+        ln_df <- nearest_reference(tree, tp_, cand_ref, k = 1)
+        if (nrow(ln_df) > 0) lineage_near_map[[tp_]] <- ln_df$nearest_ref[1]
+      }
+    }
+  }
+
+  assign_tip <- function(tp_) {
+    if (tp_ %in% names(outgroup_clade)) {
+      return(list(clade = outgroup_clade[[tp_]], basis = "outgroup"))
+    }
+    sp <- specific(tp_)
+    if (!is.na(sp)) {
+      return(list(clade = sp, basis = "clade"))
+    }
+    nr <- lineage_near_map[[tp_]]
+    if (!is.null(nr) && !is.na(nr)) {
+      sp_ref <- specific(nr)
+      if (!is.na(sp_ref)) {
+        return(list(clade = lineage_of(sp_ref), basis = "lineage fallback"))
+      }
+    }
+    list(clade = NA_character_, basis = "not placed")
+  }
+
+  assigned <- lapply(all_tips, assign_tip)
+  tip_clade <- tibble::tibble(
+    tip   = all_tips,
+    clade = vapply(assigned, `[[`, character(1), "clade"),
+    basis = vapply(assigned, `[[`, character(1), "basis")
+  )
+
+  near_q <- nearest_reference(tree, q_tips, ref_ids)
+  near_ref <- if (length(input_ref_tips) > 0) {
+    ref_prots <- sort(unique(tip_to_protein(input_ref_tips)))
+    message("[R]   ", length(ref_prots),
+            " input protein(s) match scaffold identifiers, placed against remaining scaffold")
+    purrr::map_dfr(ref_prots, function(p) {
+      own <- ref_by_protein[[p]]
+      others <- setdiff(ref_ids, own)
+      nearest_reference(tree, own, others)
+    })
+  } else {
+    nearest_reference(tree, character(), ref_ids)
+  }
+  near <- dplyr::bind_rows(near_q, near_ref)
 
   ## collapse to one row per protein: multiple NB-ARC regions must not expand the output
   per_tip <- tip_clade %>%
     left_join(near, by = "tip") %>%
-    mutate(seqname = tip_to_protein(tip))
+    mutate(seqname = tip_to_protein(tip)) %>%
+    arrange(seqname, dplyr::coalesce(nearest_dist, Inf), tip)
 
   per_protein <- per_tip %>%
     group_by(seqname) %>%
@@ -452,13 +552,12 @@ run_phylogeny <- function(outdir, classification, regions, aa, cfg, clades_path,
       n_nbarc_in_tree = dplyr::n(),
       clades = paste(sort(unique(stats::na.omit(clade))), collapse = "|"),
       n_distinct_clade = dplyr::n_distinct(stats::na.omit(clade)),
-      nearest_ref = nearest_ref[which.min(dplyr::coalesce(nearest_dist, Inf))],
-      nearest_dist = min(nearest_dist, na.rm = TRUE),
-      next_refs = next_refs[which.min(dplyr::coalesce(nearest_dist, Inf))],
+      basis = dplyr::if_else(all(basis == "outgroup"), "outgroup", ""),
+      nearest_ref = nearest_ref[1],
+      nearest_dist = nearest_dist[1],
+      next_refs = next_refs[1],
       .groups = "drop") %>%
-    mutate(nearest_dist = ifelse(is.finite(nearest_dist), nearest_dist, NA_real_),
-           clade = dplyr::if_else(n_distinct_clade == 1, clades, clades),
-           clade = dplyr::na_if(clade, ""),
+    mutate(clade = dplyr::na_if(clades, ""),
            clade = dplyr::coalesce(clade, "unplaced"),
            clade_path = vapply(clade, function(c) if (c %in% names(parent_of)) path_of(c) else c,
                                character(1)))
@@ -470,7 +569,7 @@ run_phylogeny <- function(outdir, classification, regions, aa, cfg, clades_path,
     left_join(classification %>% select(seqname, arch_subclass = `Subclass (putative)`),
               by = "seqname") %>%
     mutate(category = categorise(arch_subclass, clade, clade_path,
-                                 n_nbarc, n_distinct_clade - 1)) %>%
+                                 n_nbarc, n_distinct_clade - 1L, basis = basis)) %>%
     select(seqname, clade, clade_path, arch_subclass, category, nearest_ref, nearest_dist,
            next_refs, n_nbarc, n_nbarc_in_tree, n_distinct_clade)
 

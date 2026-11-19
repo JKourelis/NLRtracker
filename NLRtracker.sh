@@ -8,9 +8,9 @@
 #
 set -euo pipefail
 
-VERSION="2.0.2"
-INTERPROSCAN_REVISION="6.0.1"
-INTERPRO_VERSION="109.0"
+VERSION="2.0.3"
+INTERPROSCAN_REVISION="6.0.3.0"
+INTERPRO_VERSION="111.0"
 
 # The seven analyses NLRtracker classifies on. Renamed for InterProScan 6:
 #   Gene3D -> cathgene3d, ProSiteProfiles -> prosite-profiles.
@@ -23,6 +23,7 @@ module_dir="${here}/module"
 fasta=""
 outdir=""
 seqtype="p"
+seqtype_given=0
 interpro_result=""
 fimo_result=""
 hmmer_result=""
@@ -50,7 +51,7 @@ NLRtracker ${VERSION}  (InterProScan ${INTERPROSCAN_REVISION}, InterPro ${INTERP
 Usage: $(basename "$0") -s <proteins.fasta> -o <outdir> [options]
 
 Required:
-  -s FILE     Amino acid (or nucleotide, with -t n) sequence FASTA
+  -s FILE     Protein sequence FASTA
   -o DIR      Output directory
 
 Reuse existing tool output (skips that step):
@@ -61,12 +62,11 @@ Reuse existing tool output (skips that step):
 Reference data:
   -m FILE     meme.xml for FIMO            [module/meme.xml]
   -x FILE     HMM for hmmsearch            [module/abe3069_Data_S1.hmm]
-  -d FILE     InterPro entry list          [module/InterPro_<ver>.list]
+  -d FILE     InterPro entry list          [module/InterPro_${INTERPRO_VERSION}.list]
   -D DIR      InterProScan data directory  [\$INTERPROSCAN_DATADIR or
                                             ~/Bioinformatics/interproscan6/data]
 
 Execution:
-  -t p|n      Sequence type                [p]
   -c INT      CPUs per InterProScan task   [${cpus_per_task}]
   -b INT      InterProScan batch size      [auto, see below]
   -w INT      Max concurrent tasks         [all available processors]
@@ -79,7 +79,7 @@ Execution:
 
 Batch size is auto-sized from the input, because the InterProScan default of
 5000 collapses to a single work unit on small inputs and leaves most of the
-machine idle. Measured on 481 sequences: 777 s at the default against 198 s
+machine idle. Measured on 481 sequences: 776 s at the default against 197 s
 auto-sized. See docs/performance.md.
 
 Note: changing the batch size changes SMART results slightly, because
@@ -100,7 +100,7 @@ while getopts ":s:o:i:f:X:m:x:d:D:t:c:b:w:P:pLkh" opt; do
     x) hmm_file="${OPTARG}" ;;
     d) entry_list="${OPTARG}" ;;
     D) datadir="${OPTARG}" ;;
-    t) seqtype="${OPTARG}" ;;
+    t) seqtype="${OPTARG}"; seqtype_given=1 ;;
     c) cpus_per_task="${OPTARG}" ;;
     b) batch_size="${OPTARG}" ;;
     w) max_workers="${OPTARG}" ;;
@@ -118,7 +118,15 @@ done
 [[ -n "${fasta}"  ]] || { warn "-s is required"; usage; }
 [[ -n "${outdir}" ]] || { warn "-o is required"; usage; }
 [[ -f "${fasta}"  ]] || die "input FASTA not found: ${fasta}"
-[[ "${seqtype}" == "p" || "${seqtype}" == "n" ]] || die "-t must be p or n (got '${seqtype}')"
+if [[ "${seqtype_given}" -eq 1 ]]; then
+  if [[ "${seqtype}" == "n" ]]; then
+    die "nucleotide input (-t n) was retired in NLRtracker ${VERSION}. Translate nucleotide sequences to protein FASTA first, then run NLRtracker on the proteins."
+  elif [[ "${seqtype}" == "p" ]]; then
+    warn "-t is retired (NLRtracker accepts protein FASTA only); ignoring -t p"
+  else
+    die "unsupported -t '${seqtype}'. Nucleotide input (-t n) was retired; translate sequences to protein FASTA first."
+  fi
+fi
 [[ "${cpus_per_task}" =~ ^[0-9]+$ && "${cpus_per_task}" -ge 1 ]] \
   || die "-c must be a positive integer (got '${cpus_per_task}')"
 [[ -z "${batch_size}"  || "${batch_size}"  =~ ^[0-9]+$ ]] || die "-b must be an integer"
@@ -138,7 +146,7 @@ done
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 not found in PATH. See README.md"; }
 need Rscript
 [[ -n "${fimo_result}" ]] || need fimo
-if [[ "${seqtype}" == "p" && -z "${hmmer_result}" ]]; then
+if [[ -z "${hmmer_result}" ]]; then
   need hmmsearch
   [[ -f "${hmm_file}" ]] || die "HMM not found: ${hmm_file}"
 fi
@@ -146,6 +154,7 @@ if [[ -z "${interpro_result}" ]]; then
   need nextflow
   [[ -d "${datadir}" ]] || die "InterProScan data directory not found: ${datadir}
 Set it with -D, or with the INTERPROSCAN_DATADIR environment variable."
+  datadir="$(cd "${datadir}" && pwd -P)"
 fi
 # -p adds three dependencies. Check them now: the InterProScan step runs first and
 # takes far longer, so a missing tree program must not surface at the end of it.
@@ -162,8 +171,8 @@ fi
 
 # ------------------------------------------------------------------ layout
 mkdir -p "${outdir}"/{figures,sequences,annotations,raw/logs}
-outdir="$(cd "${outdir}" && pwd)"
-fasta="$(cd "$(dirname "${fasta}")" && pwd)/$(basename "${fasta}")"
+outdir="$(cd "${outdir}" && pwd -P)"
+fasta="$(cd "$(dirname "${fasta}")" && pwd -P)/$(basename "${fasta}")"
 
 log_file="${outdir}/raw/logs/nlrtracker.log"
 exec > >(tee -a "${log_file}") 2>&1
@@ -182,23 +191,34 @@ n_seq="$(grep -c '^>' "${work_fasta}" || true)"
 log "sequences    ${n_seq}"
 
 # ------------------------------------------------------------------ batching
+# Physical cores, not SMT threads: hmmsearch and pfsearch are AVX-512 and
+# memory-bandwidth bound, where SMT returns far less than 2x.
+physical_cores() {
+  local cores=""
+  if [[ -r /proc/cpuinfo ]]; then
+    cores="$(awk -F: '
+      /^physical id/ { gsub(/[ \t]/, "", $2); pid = $2 }
+      /^core id/     { gsub(/[ \t]/, "", $2); cid = $2; print (pid == "" ? "0" : pid) ":" cid }
+    ' /proc/cpuinfo 2>/dev/null | sort -u | wc -l | tr -d ' ')"
+  fi
+  if [[ ! "${cores}" =~ ^[1-9][0-9]*$ ]] && command -v lscpu >/dev/null 2>&1; then
+    cores="$(LC_ALL=C lscpu -p=CORE,SOCKET 2>/dev/null | grep -v '^#' | sort -u | wc -l | tr -d ' ')"
+  fi
+  if [[ ! "${cores}" =~ ^[1-9][0-9]*$ ]] && command -v sysctl >/dev/null 2>&1; then
+    cores="$(sysctl -n hw.physicalcpu 2>/dev/null || true)"
+  fi
+  if [[ ! "${cores}" =~ ^[1-9][0-9]*$ ]]; then
+    cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+  fi
+  [[ "${cores}" =~ ^[1-9][0-9]*$ ]] || cores=4
+  echo "${cores}"
+}
+
 # Give the Nextflow scheduler more work units than it has slots. Concurrency
 # itself is Nextflow's job and is deliberately not computed here.
 choose_batch_size() {
   local n="$1" cpus="$2" cores slots target
-  cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
-  # Physical cores, not SMT threads: the hmmsearch/pfsearch family is
-  # AVX-512 and memory-bandwidth bound, where SMT returns far less than 2x.
-  if command -v lscpu >/dev/null 2>&1; then
-    local tpc
-    tpc="$(lscpu 2>/dev/null | awk -F: '/^Thread\(s\) per core/ {gsub(/ /,"",$2); print $2}')"
-    [[ "${tpc}" =~ ^[0-9]+$ && "${tpc}" -ge 1 ]] && cores=$(( cores / tpc ))
-  elif command -v sysctl >/dev/null 2>&1; then
-    # macOS reports physical cores directly.
-    local phys
-    phys="$(sysctl -n hw.physicalcpu 2>/dev/null || true)"
-    [[ "${phys}" =~ ^[0-9]+$ && "${phys}" -ge 1 ]] && cores="${phys}"
-  fi
+  cores="$(physical_cores)"
   (( cores < 1 )) && cores=1
   slots=$(( cores / cpus )); (( slots < 1 )) && slots=1
   target=$(( n / (2 * slots) ))
@@ -229,9 +249,13 @@ if [[ -z "${ips_tsv}" ]]; then
     echo "// generated by NLRtracker ${VERSION} - do not edit"
     echo "params {"
     echo "    batchSize    = ${batch_size}"
+    echo "    subBatchSize = ${batch_size}"
     echo "    cpus         = ${cpus_per_task}"
     [[ -n "${max_workers}" ]] && echo "    maxWorkers   = ${max_workers}"
-    [[ "${use_matches_api}" -eq 0 ]] && echo "    noMatchesApi = true"
+    if [[ "${use_matches_api}" -eq 0 ]]; then
+      echo "    noMatchesApi = true"
+      echo "    skipInterproVersionCheck = true"
+    fi
     echo "}"
   } > "${run_config}"
 
@@ -248,9 +272,18 @@ if [[ -z "${ips_tsv}" ]]; then
            -with-report "${ips_out}/nextflow_report.html"
            -with-trace  "${ips_out}/trace.txt"
            -resume)
-  [[ "${seqtype}" == "n" ]] && nf_args+=(--nucleic)
 
-  nextflow -log "${ips_out}/nextflow.log" "${nf_args[@]}"
+  # Launch Nextflow inside raw/interproscan so .nextflow/ session locks and caches
+  # stay isolated per run instead of colliding in the caller's working directory.
+  # Resolve NXF_HOME physically so symlinked Nextflow asset directories mount inside containers.
+  nxf_home="${NXF_HOME:-${HOME}/.nextflow}"
+  if [[ -d "${nxf_home}" ]]; then
+    nxf_home="$(cd "${nxf_home}" && pwd -P)"
+  fi
+  (
+    cd "${ips_out}"
+    NXF_HOME="${nxf_home}" nextflow -log "${ips_out}/nextflow.log" "${nf_args[@]}"
+  )
 
   ips_tsv="$(find "${ips_out}" -maxdepth 1 -name '*.tsv' -type f | head -1)"
   [[ -n "${ips_tsv}" ]] || die "InterProScan produced no TSV in ${ips_out}"
@@ -274,21 +307,16 @@ else
 fi
 
 # ------------------------------------------------------------------ 3. HMMER
-if [[ "${seqtype}" == "p" ]]; then
-  if [[ -z "${hmmer_result}" ]]; then
-    log "running hmmsearch (C-JID)"
-    hmmer_result="${outdir}/raw/hmmer/CJID.domtblout"
-    mkdir -p "$(dirname "${hmmer_result}")"
-    hmmsearch --domtblout "${hmmer_result}" "${hmm_file}" "${work_fasta}" >/dev/null \
-      || die "hmmsearch failed"
-    log "hmmer        ${hmmer_result} ($(grep -vc '^#' "${hmmer_result}" || true) rows)"
-  else
-    log "reusing HMMER result ${hmmer_result}"
-    [[ -f "${hmmer_result}" ]] || die "HMMER result not found: ${hmmer_result}"
-  fi
+if [[ -z "${hmmer_result}" ]]; then
+  log "running hmmsearch (C-JID)"
+  hmmer_result="${outdir}/raw/hmmer/CJID.domtblout"
+  mkdir -p "$(dirname "${hmmer_result}")"
+  hmmsearch --domtblout "${hmmer_result}" "${hmm_file}" "${work_fasta}" >/dev/null \
+    || die "hmmsearch failed"
+  log "hmmer        ${hmmer_result} ($(grep -vc '^#' "${hmmer_result}" || true) rows)"
 else
-  warn "nucleotide input: C-JID detection is skipped (protein input only)"
-  hmmer_result=""
+  log "reusing HMMER result ${hmmer_result}"
+  [[ -f "${hmmer_result}" ]] || die "HMMER result not found: ${hmmer_result}"
 fi
 
 # ------------------------------------------------------------------ 3b. NB-ARC HMM

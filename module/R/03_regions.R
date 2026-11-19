@@ -175,8 +175,18 @@ build_regions <- function(domains, cfg, offset = CJID_LRR_OFFSET,
   ## The HMM defines the NB-ARC boundaries where it has a hit. This happens BEFORE
   ## arbitration, so the N-terminal/LRR/C-JID trimming and the ID subtraction all work
   ## against the HMM boundaries rather than the signature ones.
+  ## Join split NB-ARC HMM envelopes before replacing boundaries, using raw FIMO
+  ## NB-ARC motif runs (computed from `annotation`, because `build_domains()` has
+  ## already absorbed overlapping motif runs into NBARC on precedence), signature
+  ## intervals, and a 30-residue gap backstop.
   hmm_stats <- NULL
   if (!is.null(nbarc_hmm)) {
+    motif_runs <- if (!is.null(annotation) && nrow(annotation) > 0L) {
+      nbarc_motif_intervals(annotation)
+    } else {
+      NULL
+    }
+    nbarc_hmm <- join_split_nbarc(nbarc_hmm, domains = domains, motif_runs = motif_runs)
     hs <- apply_hmm_nbarc(regions, nbarc_hmm, annotation, require_signature_support)
     regions <- hs$regions
     hmm_stats <- hs

@@ -61,12 +61,12 @@ Rscript module/NLRtracker.R \
   --hmmer        sample_data/sample.CJID.domtblout \
   --nbarc-hmm    sample_data/sample.NBARC.domtblout \
   --fasta        sample_data/sample.fasta \
-  --entry-list   module/InterPro_109.0.list \
+  --entry-list   module/InterPro_111.0.list \
   --signatures   module/nlr_signatures.tsv \
   --classes      module/nlr_classes.tsv \
   --subclass-rules module/nlr_subclass_rules.tsv \
   --outdir "${tmp}/sample" --seqtype p --version test \
-  --interproscan-version 6.0.1 --interpro-version 109.0 \
+  --interproscan-version 6.0.3.0 --interpro-version 111.0 \
   --applications pfam --batch-size 16 --input-name sample > "${tmp}/sample.log" 2>&1
 rc=$?
 check "pipeline exits cleanly" "0" "${rc}"
@@ -102,9 +102,9 @@ fi
 # ---------------------------------------------------------------- 4. full RefPlantNLR check
 if [[ ${FULL} -eq 1 ]]; then
   echo
-  echo "4. RefPlantNLR — 481 published subclasses"
-  D="dev"
-  need=("${D}/RefPlantNLR.interproscan6-109.0.tsv" "${D}/RefPlantNLR.fimo.gff"
+  echo "4. RefPlantNLR: 481 published subclasses"
+  D="${REFPLANTNLR_FIXTURE_DIR:-dev}"
+  need=("${D}/RefPlantNLR.interproscan6-111.0.tsv" "${D}/RefPlantNLR.fimo.gff"
         "${D}/RefPlantNLR.CJID.domtblout" "${D}/RefPlantNLR.NBARC.domtblout"
         "${D}/RefPlantNLR.norm.fasta")
   missing=0
@@ -114,31 +114,33 @@ if [[ ${FULL} -eq 1 ]]; then
     echo "      curl -sSL -o dev/RefPlantNLR.fasta \\"
     echo "        'https://journals.plos.org/plosbiology/article/file?type=supplementary&id=10.1371/journal.pbio.3001124.s013'"
     echo "      ./NLRtracker.sh -s dev/RefPlantNLR.fasta -o dev/out_refplantnlr"
-    bad "RefPlantNLR fixtures absent — skipped"
+    bad "RefPlantNLR fixtures absent - skipped"
   else
     Rscript module/NLRtracker.R \
-      --interproscan "${D}/RefPlantNLR.interproscan6-109.0.tsv" --fimo "${D}/RefPlantNLR.fimo.gff" \
+      --interproscan "${D}/RefPlantNLR.interproscan6-111.0.tsv" --fimo "${D}/RefPlantNLR.fimo.gff" \
       --hmmer "${D}/RefPlantNLR.CJID.domtblout" --nbarc-hmm "${D}/RefPlantNLR.NBARC.domtblout" \
-      --fasta "${D}/RefPlantNLR.norm.fasta" --entry-list module/InterPro_109.0.list \
+      --fasta "${D}/RefPlantNLR.norm.fasta" --entry-list module/InterPro_111.0.list \
       --signatures module/nlr_signatures.tsv --classes module/nlr_classes.tsv \
       --subclass-rules module/nlr_subclass_rules.tsv --outdir "${tmp}/ref" --seqtype p \
-      --version test --interproscan-version 6.0.1 --interpro-version 109.0 \
+      --version test --interproscan-version 6.0.3.0 --interpro-version 111.0 \
       --applications pfam --batch-size 64 --input-name RefPlantNLR > "${tmp}/ref.log" 2>&1
     check "pipeline exits cleanly" "0" "$?"
     check "sequences classified" "481" "$(($(wc -l < "${tmp}/ref/NLRtracker.tsv")-1))"
 
-    # The five specific cases this release established. Each is a real biological result,
-    # not an arbitrary number.
+    # The specific boundary and lineage cases established for this release.
     nb() { awk -F'\t' -v P="$1" 'NR>1 && $1==P && $2=="REGION" && $3=="NB-ARC"' \
              "${tmp}/ref/Domains.tsv" | wc -l | tr -d ' '; }
     check "RRS1-R keeps both NB-ARC domains (HMM recovers the partial)" "2" "$(nb RRS1-R)"
     check "Bph1/9-1 partial duplication not merged"                     "2" "$(nb Bph19-1)"
     check "Prv^1 tandem NB-ARC not merged"                              "2" "$(nb 'Prv^1')"
     check "Pi2 stray-motif region not created"                          "1" "$(nb Pi2)"
+    check "Rpp4C4 split NB-ARC envelopes joined on motif evidence"      "1" "$(nb Rpp4C4)"
     check "CCG10-NLR (probable) calls"                                 "11" \
           "$(awk -F'\t' 'NR>1 && $3 ~ /^CCG10-NLR/' "${tmp}/ref/NLRtracker.tsv" | wc -l | tr -d ' ')"
     ov="$(grep -c 'residual region overlap' "${tmp}/ref.log" || true)"
     check "no residual region overlaps" "0" "${ov}"
+    w="$(grep -ciE '^warning|parsing issue' "${tmp}/ref.log" || true)"
+    check "no R warnings" "0" "${w}"
 
     # Agreement with the published subclasses, if Table S1 is available.
     # Set REFPLANTNLR_TABLE_S1 to the published Table S1 spreadsheet to enable this check.
@@ -149,7 +151,7 @@ if [[ ${FULL} -eq 1 ]]; then
       check "honestly ambiguous (contains the truth)" "23"  "${am}"
       check "wrong"                                   "1"   "${wr}"
     else
-      echo "    Table S1 not found — skipped the published-subclass comparison"
+      echo "    Table S1 not found - skipped the published-subclass comparison"
     fi
   fi
 fi

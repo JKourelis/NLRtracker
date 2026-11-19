@@ -2,65 +2,70 @@
 
 Find and annotate NLR immune receptors in a plant proteome.
 
-Give NLRtracker a protein FASTA file. It tells you which proteins are NLRs, which subclass each one
-belongs to, where every domain starts and stops, and how confident that subclass call is. It also
-extracts each domain as its own FASTA file and draws the domain architecture.
+Provide NLRtracker with a protein FASTA file. The pipeline identifies which proteins are NLRs, assigns each receptor to a putative subclass, defines non-overlapping domain boundaries, extracts per-domain FASTA files, builds domain-architecture figures, and writes a self-contained HTML report.
 
-Version 2.0.2 runs on InterProScan 6.0.1 and InterPro 109.0, so it now works on macOS and on Windows
-under WSL2 as well as on Linux.
+Version `2.0.3` runs on InterProScan `6.0.3.0` and InterPro `111.0` (Pfam `39.0`), working on Linux, macOS, and Windows under WSL2.
 
----
+## Quickstart
 
-## What you get out
+Run NLRtracker on the bundled test dataset after installing the dependencies and downloading InterPro `111.0` data:
 
-Nine kinds of output, from one command.
+```bash
+./NLRtracker.sh -s sample_data/sample.fasta -o out_sample
+```
 
-| | |
+Add `-p` to place each NLR NB-ARC region in the RefPlantNLR reference phylogeny:
+
+```bash
+./NLRtracker.sh -s sample_data/sample.fasta -o out_sample_phylo -p
+```
+
+For reproducible local runs without querying the InterPro Matches API, pass `-L`:
+
+```bash
+./NLRtracker.sh -s proteins.fasta -o out_dir -L -p
+```
+
+## What NLRtracker produces
+
+A single run writes nine output groups under the directory passed to `-o`:
+
+| Output | Contents |
 |---|---|
-| A classification per protein | NLR or not, the subclass, and the evidence tier behind the call |
-| Every domain with coordinates | non-overlapping, so you can use them without trimming |
-| One FASTA per domain type | `NBARC.fasta`, `TIR.fasta`, `CC.fasta`, `LRR.fasta`, `CJID.fasta`, `ID.fasta` and more |
-| Domain architecture figures | drawn automatically, paginated, and split by subclass |
-| A self-contained HTML report | one file, opens in any browser, no internet needed |
-| GFF3 annotations | for a genome browser |
-| iTOL strips | for annotating a tree |
-| A summary table | counts per class, per region and per signature |
-| A provenance file | every tool version, every setting, so a result can be reproduced |
+| `NLRtracker.tsv` | Protein classification (`Status`, `Subclass (putative)`, `subclass_support`, `Domain`, simplified architecture) |
+| `Domains.tsv` | Every chain, arbitrated region, integrated domain, NB-ARC motif, and LRR repeat row |
+| `summary.tsv` | Counts by classification, arbitrated region, and signature across the 231 curated entries |
+| `sequences/` | `NLR.fasta`, `NLR.lst`, `NLR-associated.fasta`, `NBARC.fasta`, `NBARC_deduplicated.fasta`, and one FASTA per region |
+| `figures/` | Paginated domain-architecture PDFs (`NLR.pdf`, `NLR-associated.pdf`, and `by_subclass/*.pdf`) |
+| `report.html` | Self-contained interactive report that opens locally in any browser |
+| `annotations/` | `NLR.gff3`, `NLR-associated.gff3`, `iTOL.txt`, `iTOL_dedup.txt`, and `iTOL_tree.txt` |
+| `phylogeny/` | Created with `-p`: `NB-ARC.aln`, `NB-ARC.tree`, `NB-ARC.rooted.tree`, clade assignments, discrepancies, and unplaced lists |
+| `run_info.yaml` | Run provenance recording tool versions, InterPro release, applications, batch size, and counts |
 
-Optionally, with `-p`, it also places each protein in the RefPlantNLR phylogeny and tells you where
-the tree and the domain architecture disagree.
+### Accuracy on RefPlantNLR
 
-### How well does it work
+Evaluated against the 481 experimentally validated plant NLRs in RefPlantNLR (Kourelis *et al.*, 2021) using InterPro `111.0`:
 
-We tested it against the 481 NLRs in RefPlantNLR, whose subclasses were published independently.
+- **457 exact matches (95.0%)** against published subclasses
+- **23 honest ambiguities (4.8%)** that name the true subclass inside an explicit range such as `CC-NLR or CCG10-NLR`
+- **1 undetermined call (0.2%)** (`SpNBS-LRR`), which carries no subclass evidence in any member database
 
-NLRtracker gets 457 of them exactly right. For 23 more it reports an honest ambiguity that contains
-the right answer, for example "CC-NLR or CCG10-NLR" when the evidence genuinely cannot separate the
-two. One call in 481 is wrong.
+## Requirements and installation
 
-That last number is the one worth watching. Reporting an ambiguity is not the same as being wrong,
-and the tool is built to tell you which situation you are in.
+You need six command-line tools plus about 45 GB of disk space for the InterProScan `6.0.3.0` / InterPro `111.0` data bundle.
 
----
-
-## Can you run it?
-
-You need seven things. Six are one-line installs, and the seventh is 40 GB of disk.
-
-| | | |
+| Requirement | Minimum version | Purpose |
 |---|---|---|
-| [Nextflow](https://www.nextflow.io/) | 25.10.4 or later | earlier versions cannot start InterProScan 6.0.1 |
-| A container runtime | Docker, SingularityCE or Apptainer | |
-| R | 4.1 or later | package list below |
-| [HMMER](http://hmmer.org/) | 3.3 or later | `hmmsearch`, plus `hmmalign` if you use `-p` |
-| [MEME Suite](https://meme-suite.org/) | 5.2 or later | for `fimo` |
-| [VeryFastTree](https://github.com/citiususc/veryfasttree) | 4.0 or later | only if you use `-p`. [FastTree](http://www.microbesonline.org/fasttree/) 2.1 also works |
-| Disk | about 40 GB | the InterProScan reference data |
+| [Nextflow](https://www.nextflow.io/) | `25.10.4` | Orchestrates InterProScan `6.0.3.0` |
+| Container runtime | Docker, SingularityCE, or Apptainer | Runs member database containers |
+| R | `4.1` | Region arbitration, classification, figures, HTML report, and phylogeny |
+| [HMMER](http://hmmer.org/) | `3.3` | `hmmsearch` for C-JID and NB-ARC regions; `hmmalign` for `-p` |
+| [MEME Suite](https://meme-suite.org/) | `5.2` | `fimo` for NLR motif scanning |
+| [VeryFastTree](https://github.com/citiususc/veryfasttree) or [FastTree](http://www.microbesonline.org/fasttree/) | `4.0` or `2.1` | Phylogeny construction under `-p` (falls back to `FastTree` if `VeryFastTree` is absent) |
 
-You do not need to install InterProScan itself. Nextflow fetches it and its reference data the first
-time you run.
+You do not need to install InterProScan or `mafft` separately. Nextflow fetches the `ebi-pf-team/interproscan6` `6.0.3.0` workflow automatically, and `NB-ARC_region.hmm` ships pre-built in `module/reference/`.
 
-Every R package comes from CRAN except `Biostrings`:
+Install the required R packages:
 
 ```r
 install.packages(c("dplyr", "tidyr", "readr", "stringr", "tibble", "purrr",
@@ -69,61 +74,33 @@ if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocMana
 BiocManager::install("Biostrings")
 ```
 
-`ape` is needed only for `-p`. Everything else is needed for every run.
-
-`mafft` is not a requirement. It built the reference models once, and those models ship with the
-repository, so a run never calls it. `module/reference/*.seed.aln` records what was aligned.
-
-### Install
-
-1. Install Nextflow, a container runtime, R, HMMER and the MEME Suite.
-2. Install the R packages listed above.
-3. Clone this repository.
-4. Choose a location with 40 GB free.
-5. Download the InterProScan reference data into it:
-
-   ```bash
-   nextflow run ebi-pf-team/interproscan6 -r 6.0.1 -profile docker,test \
-     --datadir /path/to/interproscan6/data --interpro 109.0
-   ```
-
-6. Tell NLRtracker where that data lives:
-
-   ```bash
-   export INTERPROSCAN_DATADIR=/path/to/interproscan6/data
-   ```
-
-   The default location is `~/Bioinformatics/interproscan6/data`.
-
----
-
-## Run it
+Download the InterPro `111.0` reference data and point `INTERPROSCAN_DATADIR` to it (default `~/Bioinformatics/interproscan6/data`):
 
 ```bash
-./NLRtracker.sh -s proteins.fasta -o out_dir
+nextflow run ebi-pf-team/interproscan6 -r 6.0.3.0 -profile docker,test \
+  --datadir /path/to/interproscan6/data --interpro 111.0
+export INTERPROSCAN_DATADIR=/path/to/interproscan6/data
 ```
 
-That produces the full output tree described below, figures included.
-
-Add `-p` to place every protein in the RefPlantNLR phylogeny as well:
+Run the fast offline regression check after installation:
 
 ```bash
-./NLRtracker.sh -s proteins.fasta -o out_dir -p
+bash tests/run_tests.sh
 ```
 
-For nucleotide input, set the sequence type:
+## Running NLRtracker
+
+NLRtracker accepts **protein FASTA files only**. Nucleotide input (`-t n`) was retired in `2.0.3`; translate transcripts or coding sequences into proteins first before running the pipeline.
 
 ```bash
-./NLRtracker.sh -s transcripts.fasta -o out_dir -t n
+./NLRtracker.sh -s proteins.fasta -o out_dir [options]
 ```
 
-C-JID detection is skipped for nucleotide input, because that model is a protein model.
+### Command-line options
 
-### Options
-
-```
+```text
 Required:
-  -s FILE     Amino acid (or nucleotide, with -t n) sequence FASTA
+  -s FILE     Protein sequence FASTA
   -o DIR      Output directory
 
 Reuse existing tool output (skips that step):
@@ -134,11 +111,11 @@ Reuse existing tool output (skips that step):
 Reference data:
   -m FILE     meme.xml for FIMO            [module/meme.xml]
   -x FILE     HMM for hmmsearch            [module/abe3069_Data_S1.hmm]
-  -d FILE     InterPro entry list          [module/InterPro_109.0.list]
-  -D DIR      InterProScan data directory  [$INTERPROSCAN_DATADIR]
+  -d FILE     InterPro entry list          [module/InterPro_111.0.list]
+  -D DIR      InterProScan data directory  [$INTERPROSCAN_DATADIR or
+                                            ~/Bioinformatics/interproscan6/data]
 
 Execution:
-  -t p|n      Sequence type                [p]
   -c INT      CPUs per InterProScan task   [2]
   -b INT      InterProScan batch size      [auto]
   -w INT      Max concurrent tasks         [all available processors]
@@ -149,376 +126,151 @@ Execution:
   -h          Help
 ```
 
-### Re-run the classification without re-running InterProScan
+### Reusing InterProScan outputs
 
-The InterProScan step dominates the runtime. To change a signature table and see the effect, feed the
-previous tool output back in:
+InterProScan accounts for most of the runtime. When testing changes to the signature tables or running `-p` on an already annotated proteome, reuse the cached intermediate outputs:
 
 ```bash
-./NLRtracker.sh -s proteins.fasta -o out2 \
-  -i out/raw/interproscan/proteins.normalised.fasta.tsv \
-  -f out/raw/fimo/fimo.gff \
-  -X out/raw/hmmer/CJID.domtblout
+./NLRtracker.sh -s proteins.fasta -o out_reclassified \
+  -i out_dir/raw/interproscan/input.normalised.fasta.tsv \
+  -f out_dir/raw/fimo/fimo.gff \
+  -X out_dir/raw/hmmer/CJID.domtblout \
+  -p
 ```
 
----
+## Output columns and evidence tiers
 
-## Output files
-
-```
-out_dir/
-├── NLRtracker.tsv          classification: Status, Subclass (putative), support, architecture
-├── Domains.tsv             every annotation, per protein. The table the figures are drawn from
-├── summary.tsv             counts per class, per region, and per signature
-├── report.html             self-contained interactive report
-├── run_info.yaml           provenance: tool versions, InterPro release, applications, batch size
-├── figures/
-│   ├── NLR.pdf             domain architecture, paginated at 50 proteins
-│   ├── NLR-associated.pdf
-│   └── by_subclass/*.pdf
-├── sequences/
-│   ├── NLR.fasta / NLR.lst
-│   ├── NLR-associated.fasta / NLR-associated.lst
-│   ├── NBARC.fasta / NBARC_deduplicated.fasta
-│   └── TIR.fasta  CC.fasta  RPW8.fasta  R1.fasta  LRR.fasta  CJID.fasta  ID.fasta
-├── annotations/
-│   ├── NLR.gff3 / NLR-associated.gff3
-│   └── iTOL.txt / iTOL_dedup.txt
-├── phylogeny/              only with -p
-│   ├── NB-ARC.input.fasta  NB-ARC.aln  NB-ARC.tree
-│   ├── clade_assignment.tsv       one row per protein: clade, parent chain, nearest
-│   │                              RefPlantNLR relatives and their distances
-│   ├── clade_summary.tsv          counts and recovery per reference clade
-│   ├── discrepancies.tsv          architecture against phylogeny, categorised
-│   ├── unplaced.tsv               proteins outside every reference clade
-│   └── excluded_low_occupancy.tsv sequences too short to place reliably
-└── raw/
-    ├── interproscan/  fimo/  hmmer/
-    └── logs/          including dropped_regions.tsv
-```
-
-### The columns in `NLRtracker.tsv`
+`NLRtracker.tsv` contains six columns:
 
 | Column | Meaning |
 |---|---|
-| `seqname` | protein identifier |
-| `Status` | `NLR`, `degenerate NLR`, `CCX`, `RPW8`, `TX`, `CJID`, `MLKL`, `NACHT`, `likely non-plant NLR` |
-| `Subclass (putative)` | `CC-NLR`, `TIR-NLR`, `CCR-NLR`, `CCG10-NLR`, or an explicit ambiguity such as `CC-NLR or CCG10-NLR` |
-| `subclass_support` | how the call was reached, and how much to trust it |
-| `Domain` | full architecture, for example `(CC)(NBARC)(LRR)` |
-| `Domain architecture simplified` | one letter per region, for example `CNL` |
+| `seqname` | Protein identifier (truncated at first whitespace, `/` removed to match InterProScan) |
+| `Status` | `NLR`, `degenerate NLR`, `CCX`, `RPW8`, `TX`, `CJID`, `MLKL`, `NACHT`, or `likely non-plant NLR` |
+| `Subclass (putative)` | `CC-NLR`, `TIR-NLR`, `CCR-NLR`, `CCG10-NLR (probable)`, explicit ambiguity such as `CC-NLR or CCG10-NLR`, `TN (OTHER)`, or `UNDETERMINED` |
+| `subclass_support` | Evidence tier backing the subclass call |
+| `Domain` | Ordered region architecture, for example `(CC)(NBARC)(LRR)` |
+| `Domain architecture simplified` | One-letter code per region, for example `CNL` |
 
----
+### Interpreting `subclass_support`
 
-## A subclass call is only as good as its evidence
+Two proteins labelled `CC-NLR` may rest on very different evidence: one carries a recognised N-terminal coiled-coil domain, whereas another carries only a lineage-correlated winged-helix marker inside the NB-ARC. The `subclass_support` column exposes that distinction.
 
-Two proteins can both be called `CC-NLR` for very different reasons. One has a recognisable coiled-coil
-domain at its N-terminus. The other has no N-terminal domain at all, and the call rests on a marker
-inside the NB-ARC that happens to correlate with the CC lineage. Those are not equally trustworthy,
-and a single subclass column cannot tell them apart.
+| Tier | Evidence used | RefPlantNLR calls | Wrong calls |
+|---|---|---:|---:|
+| `domain` | Diagnostic N-terminal domain (`CC`, `TIR`, `RPW8`, `CblN`, or `C-JID`) | 443 | 0 |
+| `lineage` | NB-ARC winged-helix marker without an N-terminal domain | 23 | 0 |
+| `probable` | Gated multi-signature rule (`CCG10-NLR` via `PF23247` without `PF18052`/`cd14798`) | 11 | 0 |
+| `motif` | MEME motifs only | 2 | 0 |
+| `supporting` | Low-coverage corroborating LRR signature | 1 | 0 |
+| *(empty)* | No subclass evidence detected (`UNDETERMINED`) | 1 | 1 |
 
-The `subclass_support` column records which kind of evidence was used. On RefPlantNLR it predicts
-reliability directly.
+Every call carrying non-empty `subclass_support` is 100% accurate on RefPlantNLR. Treat `CCG10-NLR (probable)` as high-precision when present (11/11 on RefPlantNLR), while remembering that 8 of 19 RefPlantNLR CCG10-NLRs lack `PF23247` and instead report `CC-NLR or CCG10-NLR` under `lineage` support.
 
-| Tier | What was found | Wrong calls in 481 |
-|---|---|---:|
-| `domain` | a diagnostic N-terminal domain | 0 |
-| `probable` | a gated rule fired | 0 |
-| `lineage` | an NB-ARC winged-helix marker only, so the call is reported as an explicit ambiguity | 0 |
-| `supporting` | a low-coverage signature corroborated an existing call | 0 |
-| `motif` | MEME motifs only | 0 |
-| *(empty)* | no subclass evidence at all | 1 |
+## Boundary arbitration and integrated domains
 
-Read `(probable)` as trustworthy when it appears and meaningless when it does not. The gated rule
-that produces it is designed to stay silent rather than guess.
+Raw InterProScan signatures frequently overlap across domain boundaries. Version `2.x` anchors every NLR on its NB-ARC (or bare P-loop) and resolves overlaps in fixed order:
 
-The single wrong call in 481 sits in the bottom row, where there was no subclass evidence at all. That
-is the pattern worth knowing: when the tool has nothing to go on, it says so.
+1. Build `NB-ARC` regions from `NB-ARC_region.hmm` (`LENG 382`, joining split envelopes backed by FIMO motif continuity, spanning signatures, or a 30-residue gap backstop).
+2. Truncate N-terminal regions (`TIR`, `CC`, `RPW8`, `R1`) to end before the nearest overlapping `NB-ARC` or `PLOOP`.
+3. Truncate `LRR` to start after the `NB-ARC` or `PLOOP` ends.
+4. Truncate `C-JID` to start after the `LRR` ends.
+5. Subtract canonical regions from integrated-domain (`ID`) intervals so fused domains remain intact without overlapping core NLR domains.
 
----
+Any region trimmed out of existence is recorded in `raw/logs/dropped_regions.tsv`. Because all final regions are strictly disjoint, FASTA files in `sequences/` can enter multiple sequence alignments directly without manual trimming.
 
-## Why regions do not overlap
+## Phylogenetic classification (`-p`)
 
-Raw signature coordinates overlap constantly. An LRR signature routinely runs into the NB-ARC, and a
-TIR signature runs into the protein's N-terminus. Version 1.x reported those coordinates unchanged,
-which meant extracted domain sequences needed trimming by hand, and figures drew domains on top of one
-another.
+With `-p`, NLRtracker aligns extracted `NB-ARC` regions (covering at least 50% of the 382 match states) against `module/reference/NB-ARC_region.reference.fasta` (500 reference NB-ARC regions from the 481 published RefPlantNLR proteins plus four divergent *Nicotiana benthamiana* TNP TIR-NLR outgroup sequences) using `hmmalign` and `VeryFastTree` (falling back to `FastTree` when `VeryFastTree` is absent).
 
-Version 2.0 settles the boundaries instead. The NB-ARC is the anchor, a bare P-loop anchors the same
-way, and the anchor is never trimmed.
+- **Rooted tree and tip strips:** `phylogeny/NB-ARC.tree` keeps the raw unrooted output with full tip identifiers restored, `phylogeny/NB-ARC.rooted.tree` holds the outgroup-rooted and ladderised tree used for all clade calls, and `annotations/iTOL_tree.txt` matches every tip in the rooted tree (including `_(n)` tandem-copy labels and all 500 scaffold tips).
+- **23 active clades:** `module/nlr_clades.tsv` defines `TNP` (outgroup) plus 22 anchored clades with `PHYLO_ANCHOR_QUORUM = 1.00`, nested subfamily parents (`CNL8`, `CNL6`, and `ZfBED` under `CC-01`; `Pik-1`, `Pik-2`, `RGA4`, `RGA5`, `RPP13`, and `CNL4` under `CC-02`), and `DAR5` placed in `CCR-NRG1`. Outgroup tips report `TNP` with category `outgroup`.
+- **Lineage fallback for paraphyletic clades:** Because `TIR-NLR` nests inside the broader CC radiation, `CC-NLR` spans more than 90% of reference tips and acts as a nearest-informative-reference lineage fallback rather than overriding nested clades.
 
-1. Build the NB-ARC region. Merge the P-loop, HD1, winged-helix and NB-ARC motif evidence.
-2. Truncate every N-terminal region, meaning TIR, CC, RPW8 and R1, to end before the NB-ARC starts.
-3. Truncate the LRR to start after the NB-ARC ends.
-4. Truncate the C-JID to start after the LRR ends.
-5. Subtract every canonical region from the integrated-domain regions.
+## Reference tables and InterPro updates
 
-A region trimmed out of existence is dropped and then reported in `raw/logs/dropped_regions.tsv`,
-grouped by the rule that removed it. A TIR lying entirely inside an NB-ARC call is a signal worth
-seeing, not something to hide.
+Biological mappings live in three TSV files under `module/` (`231` signatures in `nlr_signatures.tsv`, `41` domain classes in `nlr_classes.tsv`, and `1` multi-signature rule in `nlr_subclass_rules.tsv`), paired with `module/InterPro_111.0.list` (`72,944` InterPro `111.0` entries). Seven InterProScan analyses run by default: `pfam,cathgene3d,superfamily,prints,smart,cdd,prosite-profiles`. `prosite-patterns` stays disabled because none of the 231 curated signatures relies on it. See [`docs/signatures.md`](docs/signatures.md) for signature roles and [`docs/nbarc-hmm.md`](docs/nbarc-hmm.md) for NB-ARC HMM details.
 
-Every run asserts that the result is disjoint. That is what makes the per-region FASTA files usable
-directly for alignment and phylogeny, with no further trimming.
+To refresh metadata tables against a future InterPro release:
 
-### The integrated-domain region
+```bash
+git show v1.0.3:module/NLRtracker.R > /tmp/NLRtracker.legacy.R
+python3 module/build_signature_table.py \
+  --entries $INTERPROSCAN_DATADIR/interpro/<ver>/entries.json \
+  --legacy /tmp/NLRtracker.legacy.R \
+  --outdir module \
+  --interpro-version <ver>
+```
 
-An integrated domain is a domain fused into an NLR that does not belong to the NLR core, such as a
-WRKY transcription factor domain or a heavy-metal-associated domain. Those are how many NLRs
-recognise their targets, so they matter.
+## Performance and parallelisation
 
-Every integrated domain contributes an `ID` region. That gives one consistent handle for "this NLR has
-an integrated domain" across `Domains.tsv`, the figures, `ID.fasta` and the GFF3. The specific name is
-kept in a parallel `DOMAIN` row, so a figure still labels it `WRKY`, `HMA` or `PKin`.
+NLRtracker auto-sizes InterProScan `batchSize` from physical CPU cores (`/proc/cpuinfo` or `lscpu` on Linux, `sysctl hw.physicalcpu` on macOS, falling back to `getconf _NPROCESSORS_ONLN`) so small datasets saturate available cores. Measured on 24 physical cores with `-L` (Matches API off):
 
-An integrated domain can sit on either side of the NB-ARC, so truncating it from one end would be
-wrong. Subtracting the canonical regions can split one integrated domain into pieces, which is the
-correct answer when a domain genuinely straddles a boundary.
-
----
-
-## The biology lives in three tables, not in the code
-
-Version 1.x encoded the rule for every signature as a 90-line branching statement inside the R script.
-Updating InterPro meant editing that statement, and there was no way to see what any signature did
-without reading code.
-
-All of it is now data.
-
-| File | Contents |
-|---|---|
-| `module/nlr_signatures.tsv` | 231 signatures, each with its database, InterPro entry, domain class, subclass evidence, hit counts and provenance |
-| `module/nlr_classes.tsv` | 41 classes, each with its region, merge group, precedence, architecture letter, colour and shape |
-| `module/nlr_subclass_rules.tsv` | the rules that need more than one signature |
-
-Three consequences follow. An InterPro update becomes a data refresh rather than a code change.
-Anyone can see what a signature does by reading one line. And the same tables can drive a different
-implementation, which is what makes the tool portable beyond R.
-
-`docs/signatures.md` explains, per domain class, which signatures belong to it, how they overlap, and
-what a hit means for the classification.
-
-### Update the tables after a new InterPro release
-
-1. Download the new release with InterProScan.
-2. Recover the 1.x script from git. It holds the original signature-to-class mapping:
-
-   ```bash
-   git show v1.0.3:module/NLRtracker.R > /tmp/NLRtracker.legacy.R
-   ```
-
-3. Run the generator against the new `entries.json`:
-
-   ```bash
-   python3 module/build_signature_table.py \
-     --entries  $INTERPROSCAN_DATADIR/interpro/110.0/entries.json \
-     --legacy   /tmp/NLRtracker.legacy.R \
-     --outdir   module \
-     --interpro-version 110.0
-   ```
-
-4. Read the generator report.
-5. Check the `ABSENT` list. Those signatures no longer exist and can never match.
-6. Download the new entry list to `module/InterPro_<version>.list`.
-7. Update `INTERPRO_VERSION` in `NLRtracker.sh`.
-8. Run `tests/run_tests.sh --full`.
-9. Compare the classification with the previous release.
-
----
-
-## The speedup applies to a new genome, not a published one
-
-InterProScan 6 splits the input into batches and runs every analysis once per batch. Its default batch
-size of 5000 suits a whole proteome. On a smaller input it collapses to a single batch, which leaves
-most of the machine idle.
-
-NLRtracker sizes the batch from the input instead. Measured on 24 physical cores, with the Matches API
-switched off so that every sequence was computed locally:
-
-| Input | Upstream default | Auto-sized | Speedup |
+| Input | Upstream default (`-b 5000`) | Auto-sized (`-b`) | Speedup |
 |---|---:|---:|---:|
-| 481 sequences | 777 s | 198 s | 3.92× |
-| 6 000 proteins | 1369 s | 438 s | 3.13× |
+| 481 sequences (`RefPlantNLR`) | 776 s | 197 s (`-b 64`) | 3.93x |
+| 6,000 sequences | 1,368 s | 437 s (`-b 250`) | 3.13x |
 
-Now the part that decides whether those numbers apply to you.
-
-By default InterProScan looks each sequence up in the InterPro Matches API and computes only what is
-missing. For a published proteome most sequences come back from that lookup, so the wall clock is set
-by network latency rather than by your processor, and the batch size barely matters.
-
-For a new genome nothing is precalculated, everything is computed locally, and the batch size decides
-the runtime. That is the case the table above measures, and it is the case that actually hurts.
-
-Two practical consequences:
-
-1. Benchmark with `-L`, which disables the lookup. Otherwise you are timing EBI's latency.
-2. Record which path a published result took. The same input can be served either way depending on
-   release timing.
-
-> Two runs of the same input at different batch sizes differ by roughly 0.1% of InterProScan rows, or
-> 44 rows out of 34 732 at proteome scale. SMART's prefilter is not normalised for database size
-> upstream, and CATH-Gene3D shifts with its sub-batch split. Keep the batch size constant across runs
-> you intend to compare. `run_info.yaml` records the value used.
-
-> Automatic batch sizing reads the physical core count, from `lscpu` on Linux and
-> `sysctl hw.physicalcpu` on macOS. If neither answers it falls back to `getconf _NPROCESSORS_ONLN`,
-> which counts logical processors and so over-counts on a machine with simultaneous multithreading.
-> The batch size affects speed only, never results. Set `-b` to remove the guess.
-
----
+See [`docs/performance.md`](docs/performance.md) and [`docs/interproscan6-notes.md`](docs/interproscan6-notes.md) for batch-size and SMART prefilter caveats.
 
 ## Platform support
 
-InterProScan 6 removed the Java and Linux-only requirement, so NLRtracker runs on all three
-platforms. The containers are `linux/amd64` only, which matters on Apple Silicon.
-
-| Platform | Status |
-|---|---|
-| Linux | Native. This is the tested platform. |
-| Intel Mac | Native `linux/amd64` containers. Install HMMER, the MEME Suite and VeryFastTree from Homebrew or Bioconda. |
-| Apple Silicon | Runs under Docker Desktop's `amd64` emulation, and is much slower. Raise the Docker Desktop memory limit, because the default 2 GB is below what the InterProScan tasks request. |
-| Windows | Run inside WSL2, which behaves as Linux. `NLRtracker.sh` is a bash script, so it does not run in PowerShell or `cmd`. |
-
-Every component, by platform:
-
 | Component | Linux | macOS | Windows |
 |---|---|---|---|
-| `NLRtracker.sh` | yes | yes | WSL2 only. It is bash, and it reads `lscpu` and `/proc` to size batches |
-| InterProScan 6 (Nextflow and a container) | yes | yes | yes, inside WSL2 |
-| `module/*.R` | yes | yes | yes |
-| HMMER, MEME Suite | yes | yes | no practical native build. Use WSL2 |
-| VeryFastTree | yes | yes | WSL2 |
+| `NLRtracker.sh` | Native | Native (Intel or Apple Silicon via Docker `amd64`) | WSL2 |
+| InterProScan 6 containers | Native | Docker Desktop (raise memory limit above 2 GB on Apple Silicon) | WSL2 |
+| R, HMMER, MEME, VeryFastTree | Native | Homebrew or Bioconda | WSL2 |
 
-The R code and the reference data are portable. The shell wrapper is the part that ties a run to a
-POSIX system, and WSL2 satisfies it.
+## Troubleshooting
 
----
-
-## What changed in 2.0.0
-
-| | |
-|---|---|
-| InterProScan 6 | Runs through Nextflow and containers, with no local Java install. This is what removed the Linux-only constraint. |
-| InterPro 109.0 | The bundled entry list had been frozen at InterPro 5.53-87.0 from 2021, holding 40 038 entries against 54 191 today. |
-| 9 new NLR signatures | Three NB-ARC winged-helix Pfam entries, four NLR-specific LRR Pfam entries, an MLKL N-terminal CDD entry, and a four-helix-bundle superfamily. All curated against RefPlantNLR and a full proteome. See [`docs/signatures.md`](docs/signatures.md). |
-| CCG10-NLR can now be assigned | It could previously appear only inside the ambiguous string `CC-NLR or CCR-NLR or CCG10-NLR`. |
-| Regions are arbitrated | TIR, CC, RPW8, R1, LRR, C-JID and a general integrated-domain region no longer overlap. |
-| One FASTA per region | `TIR.fasta`, `CC.fasta`, `LRR.fasta`, `CJID.fasta`, `ID.fasta` and more, alongside `NBARC.fasta`. |
-| Figures are automatic | No separate `refplantnlR` step is needed. |
-| An HTML report | One self-contained file, with no external assets. |
-| Optional phylogeny | `-p` places each protein in the RefPlantNLR phylogeny and flags disagreement with the architecture. |
-| Signature logic became data | A 90-line branching statement became three TSV tables that regenerate on each InterPro release. |
-| Organised output | Results stay at the top level. Sequences, annotations, figures and raw tool output moved into subdirectories. |
-| Provenance | `run_info.yaml` records every version, the applications used, and the batch size. |
-
----
+- **Symlinked `~/.nextflow` or container mount errors:** `NLRtracker.sh` resolves `outdir`, `fasta`, `datadir`, and `NXF_HOME` physically (`pwd -P`) so Nextflow's `bin/` directory mounts inside Docker containers cleanly. If you relocate Nextflow caches, point `NXF_HOME` to a directory accessible to Docker.
+- **Session lock collisions:** Each run executes Nextflow inside `<outdir>/raw/interproscan/`, isolating `.nextflow/` locks so multiple jobs can run concurrently from the same repository checkout.
+- **Retired `-t n` option:** Passing `-t n` stops immediately with a message asking you to translate nucleotide FASTA to protein sequences before running NLRtracker.
+- **Pfam `39.0` (`InterPro 111.0`) `PF00931.30` shift on `TN2`:** `PF00931.30` shortened from `175` to `152` aa in Pfam `39.0`, so `TN2` loses its `PF00931` hit and reports `Status = degenerate NLR` while retaining its `TIR-NLR` subclass and its `NB-ARC` region (`168–374`) from `NB-ARC_region.hmm`.
+- **Docker memory on macOS:** Raise Docker Desktop's memory limit to at least 8 GB so InterProScan tasks do not exit with status 137.
 
 ## Upgrading from 1.x
 
-Five things changed that will break an existing script.
-
-**The output layout moved.** A script reading `out/NLR.fasta` now needs `out/sequences/NLR.fasta`, and
-`out/NLR.gff3` becomes `out/annotations/NLR.gff3`.
-
-**`NBARC.fasta` boundaries moved.** The new winged-helix Pfam entries extend the NB-ARC over the
-winged-helix subdomain, so extracted NB-ARC sequences are generally longer and more complete.
-Alignments and trees built from 1.x output are not directly comparable.
-
-**Region coordinates moved** for TIR, CC, RPW8, LRR and C-JID, because they are now arbitrated rather
-than taken raw from the signatures.
-
-**`-i` now expects an InterProScan 6 TSV file, not an InterProScan 5 GFF3.** The two formats are
-incompatible: InterProScan 5 put the accession in `Name=` with a separate `signature_desc=`, while
-InterProScan 6 puts the description in `Name=` and the accession in `Alias=`. The parser rejects a
-version-5 file rather than producing wrong results.
-
-**`refplantnlR` needs 0.2.0 or later.** Earlier versions stop on the new region names with
-*"Insufficient values in manual scale"*.
-
----
+1. Outputs moved into subdirectories (`sequences/NLR.fasta`, `annotations/NLR.gff3`, `figures/NLR.pdf`).
+2. `NBARC.fasta` and region coordinates reflect the locked `382`-state HMM and non-overlapping arbitration.
+3. `-i` requires an InterProScan `6` TSV file, not an InterProScan `5` GFF3 file.
+4. `refplantnlR` `0.2.0` or later is required if loading `Domains.tsv` into external plotting code.
 
 ## Citation
 
 If you use NLRtracker, please cite:
 
-- **RefPlantNLR**. Kourelis J, Sakai T, Adachi H, Kamoun S (2021). *RefPlantNLR is a comprehensive
-  collection of experimentally validated plant disease resistance proteins from the NLR family.* PLoS
-  Biology 19(10): e3001124.
-- **InterPro**. Blum M, et al. (2025). *InterPro: the protein sequence classification resource in
-  2025.* Nucleic Acids Research 53(D1): D444–D456.
-- **MEME Suite**. Bailey TL, et al. (2015). *The MEME Suite.* Nucleic Acids Research 43(W1): W39–W49.
-- **NLR Annotator** motifs. Steuernagel B, et al. (2020). *The NLR-Annotator tool enables annotation
-  of the intracellular immune receptor repertoire.* Plant Physiology 183(2): 468–482.
-- **C-JID model**. Ma S, et al. (2020). *Direct pathogen-induced assembly of an NLR immune receptor
-  complex to form a holoenzyme.* Science 370(6521): eabe3069.
-
----
+- **RefPlantNLR:** Kourelis J, Sakai T, Adachi H, Kamoun S (2021). *RefPlantNLR is a comprehensive collection of experimentally validated plant disease resistance proteins from the NLR family.* PLoS Biology 19(10): e3001124.
+- **InterPro:** Blum M *et al.* (2025). *InterPro: the protein sequence classification resource in 2025.* Nucleic Acids Research 53(D1): D444–D456.
+- **MEME Suite:** Bailey TL *et al.* (2015). *The MEME Suite.* Nucleic Acids Research 43(W1): W39–W49.
+- **NLR-Annotator motifs:** Steuernagel B *et al.* (2020). *The NLR-Annotator tool enables annotation of the intracellular immune receptor repertoire.* Plant Physiology 183(2): 468–482.
+- **C-JID model:** Ma S *et al.* (2020). *Direct pathogen-induced assembly of an NLR immune receptor complex to form a holoenzyme.* Science 370(6521): eabe3069.
 
 ## Version history
 
+### 2.0.3
+
+- Updated InterProScan default to `6.0.3.0` and InterPro release to `111.0` (`Pfam 39.0`, `72,944` entries in `module/InterPro_111.0.list`), updating 4 signature metadata rows with zero withdrawn signatures and keeping all `231` signatures and `prosite-patterns` disabled.
+- Launched Nextflow inside `<outdir>/raw/interproscan/` with physically resolved paths (`pwd -P`) and `NXF_HOME` resolution, and detected physical CPU cores via `/proc/cpuinfo` before `lscpu`/`sysctl`/`getconf`.
+- Retired `-t n` nucleotide input cleanly.
+- Backported evidence-based split NB-ARC HMM envelope joining (FIMO motif order, spanning signature, and 30-residue gap backstop; joins `Rpp4C4` into one NB-ARC region).
+- Fixed phylogeny handling: honoured `FastTree` fallback, normalised `/` and `_(n)` tip/anchor lookups, raised `PHYLO_ANCHOR_QUORUM` to `1.00`, retained query proteins matching scaffold IDs, wrote `NB-ARC.rooted.tree`, protected `TNP` outgroups (`outgroup` category), keyed `annotations/iTOL_tree.txt` on tree tips, updated `module/nlr_clades.tsv` to `23` active clades (`DAR5` in `CCR-NRG1`, nested parents), and regenerated the 500-region scaffold.
+- Removed dead `support` column selection in `module/R/07_report.R` and removed committed `.Rhistory` and legacy InterPro `5.53-87.0.list`.
+
 ### 2.0.2
 
-**The reported accuracy was understated, and is now correct: 457 of 481, not 453.**
-
-The scoring script compared its own identifiers against the published Table S1 without applying
-the same normalisation the pipeline applies. InterProScan strips `/` from sequence names, so
-`Bph1/9-1` becomes `Bph19-1`, and the four Bph1/9 alleles therefore matched nothing in Table S1
-and were dropped from the score without a word. The totals covered 477 proteins while appearing
-to cover 481.
-
-All four were called correctly the whole time. Exact agreement is 457 of 481, or 95.0 per cent,
-with 23 honest ambiguities and 1 wrong call. No classification changed.
+- Fixed identifier normalisation in `tests/score_refplantnlr.py` (`/` removal matching InterProScan), restoring accurate scoring (`457` exact, `23` ambiguous, `1` wrong across all `481` RefPlantNLR entries).
 
 ### 2.0.1
 
-Two fixes to the optional phylogeny step. Nothing else changed, and classification is
-untouched.
-
-**Tip names in `phylogeny/NB-ARC.tree` are no longer corrupted.** `ape::write.tree` sanitises
-labels silently, so `Bph19-1_(1)` came out as `Bph19-1_-1`. Names in the published tree could
-therefore not be joined back to `NLRtracker.tsv`, and it affected exactly the proteins carrying
-duplicated NB-ARC domains: Bph19, Pib, RGA2 and Prv. The tree is now published by substituting
-quoted names into VeryFastTree's own output, so the file is what the tree program wrote with the
-identifiers put back.
-
-**Tree building now uses one thread by default.** VeryFastTree 4.0.5 is not reproducible above
-one thread, and on this data it also returns a much worse tree. Each thread count run twice on
-the 507-tip reference scaffold:
-
-| Threads | Splits reported bad | Reproducible | Time |
-|---:|---:|---|---:|
-| 1 | 6 of 414 | yes | 2.71 s |
-| 2 | 401 of 414 | no | 1.96 s |
-| 4 | 378 of 414 | no | 1.42 s |
-| 8 | 378 of 414 | no | 1.47 s |
-
-The whole saving was 1.2 seconds. Pass `--threads` to `module/NLRtracker.R` to raise it if a
-very large query set needs it, and record the value you used.
-
-If you built a tree with 2.0.0, rebuild it.
+- Preserved exact tree tip labels in `NB-ARC.tree` and set default `VeryFastTree` threads to `1` for reproducible trees.
 
 ### 2.0.0
 
-- InterProScan 6.0.1 through Nextflow, and InterPro 109.0
-- Runs on macOS and on Windows under WSL2
-- 9 new NLR signatures, curated against RefPlantNLR and a full proteome
-- CCG10-NLR assignable for the first time, through a gated rule reported as `(probable)`
-- Arbitrated, non-overlapping regions: TIR, CC, RPW8, R1, NB-ARC, PLOOP, LRR, C-JID, ID
-- One FASTA file per region
-- Automatic domain-architecture figures, paginated and split by subclass
-- A self-contained HTML report
-- Optional phylogenetic classification against RefPlantNLR, with `-p`
-- A `subclass_support` column recording the evidence tier behind each call
-- Signature logic moved out of the code into three regenerable TSV tables
-- Auto-sized InterProScan batching, 3 to 4 times faster than the upstream default on local compute
-- `summary.tsv` and `run_info.yaml`
-- Reorganised output tree. This is a breaking change.
-- Hardened driver: `set -euo pipefail`, validated arguments, quoted paths
+- Migrated wrapper to InterProScan `6.0.1` (`InterPro 109.0`), data-driven signature tables (`231` signatures), gated `CCG10-NLR` rule, arbitrated non-overlapping regions, per-region FASTAs, automatic PDFs, HTML report, and optional `-p` phylogeny.
 
 ### 1.0.3 and earlier
 
 See [`docs/CHANGELOG-1.x.md`](docs/CHANGELOG-1.x.md).
-
----
 
 ## Licence
 

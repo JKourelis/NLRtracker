@@ -38,7 +38,7 @@ build_report_payload <- function(classification, domains_tbl, regions, annotatio
 
   ph <- NULL
   if (!is.null(phylo) && nrow(phylo) > 0) {
-    ph <- phylo %>% select(any_of(c("seqname", "clade", "clade_path", "support",
+    ph <- phylo %>% select(any_of(c("seqname", "clade", "clade_path",
                                     "nearest_ref", "nearest_dist", "category")))
   }
 

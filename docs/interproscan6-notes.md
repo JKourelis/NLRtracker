@@ -1,71 +1,57 @@
 # InterProScan 6 notes
 
-Working notes on InterProScan 6.0.1, kept because two of them are places where the official
-documentation is wrong and the parsers here depend on the real behaviour.
+Working notes on InterProScan `6.0.3.0` (`InterPro 111.0`) behaviour observed while testing NLRtracker.
 
-Official documentation: <https://interproscan6.readthedocs.io/latest/>. Note `latest`. Several
-older manifest URLs still in circulation return 404.
+Official documentation: <https://interproscan6.readthedocs.io/latest/>.
 
----
+## 1. TSV column layout
 
-## 1. The TSV columns
+InterProScan `6` emits a 15-column TSV without a header. Two columns differ from early `6.x` documentation:
 
-InterProScan 6 writes a 15-column TSV. Two columns do not match the published description.
-
-| # | Content | Note |
+| Column | Content | Note |
 |---:|---|---|
 | 1 | Protein accession | |
 | 2 | Sequence MD5 | |
 | 3 | Sequence length | |
-| 4 | Analysis | `Pfam`, `CDD`, `SUPERFAMILY`, … |
+| 4 | Analysis | `Pfam`, `CDD`, `SUPERFAMILY`, `PRINTS`, `SMART`, `CATH-Gene3D`, `ProSiteProfiles` |
 | 5 | Signature accession | |
-| 6 | Signature description | present even when the signature is unintegrated |
+| 6 | Signature description | Populated even for unintegrated signatures |
 | 7 | Start | |
 | 8 | Stop | |
-| 9 | Score / E-value | |
-| 10 | **Match source** | documented as the boolean `T`. It is not. |
+| 9 | Score or E-value | |
+| 10 | Match status / source | `module/R/01_parse.R` does not require `"T"` here |
 | 11 | Date | |
 | 12 | InterPro accession | `-` when unintegrated |
 | 13 | InterPro description | `-` when unintegrated |
-| 14 | GO annotations | optional |
-| 15 | **Pathway annotations** | the column order around 14/15 differs from the documentation |
+| 14 | GO annotations | `-` when absent |
+| 15 | Pathway annotations | `-` when absent |
 
-Consequences for this repository:
+`module/R/01_parse.R` reads TSVs with `quote = ""` so bare double quotes inside InterPro entry names (such as `IPR036390`, `"Winged helix" DNA-binding domain`) do not shift columns or corrupt quotes.
 
-- Do not test column 10 for `T`. `module/R/01_parse.R` ignores it.
-- An unintegrated signature gives `-` in columns 12 and 13 but still carries its description in
-  column 6, so a signature must never be discarded for lacking an InterPro accession. Several NLR
-  signatures are unintegrated.
+## 2. InterProScan 5 GFF3 incompatibility
 
-## 2. IPS5 GFF3 is not a drop-in substitute
+NLRtracker `1.x` parsed InterProScan `5` GFF3 files, whose `Name=` and `Alias=` attributes map differently from InterProScan `6`. Passing an InterProScan `5` output to `-i` triggers an explicit validation error in `read_interproscan()` rather than producing silent misannotations.
 
-NLRtracker 1.x parsed the InterProScan 5 GFF3. The `Name=` and `Alias=` attribute semantics are
-effectively swapped between the two versions, so an IPS5 GFF3 read as if it were IPS6 output yields
-signature accessions in the wrong field. This is why 2.x reads the TSV and why the 1.x fixtures were
-removed from `sample_data/` rather than kept alongside.
+## 3. Applications and `prosite-patterns`
 
-## 3. `prosite-patterns` is broken in 6.0.1
+NLRtracker runs seven applications by default:
 
-The `prosite-patterns` application fails with `ps_scan.pl: command not found`. It is therefore not
-in the `APPLICATIONS` list in `NLRtracker.sh`. `prosite-profiles` works and is used.
+```text
+pfam,cathgene3d,superfamily,prints,smart,cdd,prosite-profiles
+```
 
-## 4. The Matches API changes what is computed, not what is reported
+In InterProScan `6.0.1`, `prosite-patterns` failed with `ps_scan.pl: command not found`. Although `6.0.3.0` executes `prosite-patterns` cleanly, NLRtracker keeps it disabled because none of the `231` curated NLR signatures relies on a PROSITE pattern (`prosite-profiles` covers all required PROSITE entries).
 
-By default InterProScan looks sequences up in the InterPro Matches API and computes only the
-remainder. `-L` disables the lookup and forces a fully local run.
+## 4. Matches API, offline `-L` mode, and `run_info.yaml`
 
-Results are equivalent. Runtime is not, and neither is reproducibility: a lookup result depends on
-the state of a remote service. Use `-L` for anything that must be reproducible, and see
-[`performance.md`](performance.md) for what that costs.
+By default, InterProScan checks the remote EBI Matches API and runs containers only for uncached sequences. Pass `-L` to force fully local execution (`noMatchesApi = true` and `skipInterproVersionCheck = true`), which guarantees reproducibility across InterPro updates without depending on remote lookup state.
 
-`run_info.yaml` records whether the API was used.
+`run_info.yaml` records `nlrtracker_version`, `interproscan_version`, `interpro_version`, `applications`, `interproscan_batch_size`, `seqtype`, `input`, input/classified/region/signature counts, `R_version`, and `run_date`.
 
-## 5. `json_to_tsv.py`
+## 5. Nextflow isolation and symlinked caches
 
-`module/json_to_tsv.py` converts InterProScan 6 JSON to the 15-column TSV, so existing JSON output
-can be reused without recomputing. It reproduces the real TSV byte for byte, which required two
-non-obvious choices:
+`NLRtracker.sh` launches `nextflow` inside `<outdir>/raw/interproscan/` with absolute paths and physically resolved (`pwd -P`) `datadir`, `outdir`, `fasta`, and `NXF_HOME`. That prevents concurrent runs from colliding on `.nextflow/` session locks in the working directory and ensures Docker bind-mounts succeed when `~/.nextflow` is a symlink. Setting `subBatchSize` equal to `batchSize` in `nlrtracker.config` also avoids Nextflow `splitFasta` serialisation races on large inputs.
 
-- Parse numbers as strings (`parse_float=str, parse_int=str`). Round-tripping through a float
-  changes the formatting of E-values.
-- For CDD, fall back to the location-level E-value when the match level has none.
+## 6. `module/json_to_tsv.py`
+
+`module/json_to_tsv.py` converts InterProScan `6` JSON into the 15-column TSV format using string number parsing (`parse_float=str`, `parse_int=str`) and location-level E-value fallback for `CDD` matches.

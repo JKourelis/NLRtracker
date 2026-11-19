@@ -18,6 +18,10 @@ IPS6_COLS <- c("seqname", "md5", "seq_length", "analysis", "signature", "sig_des
 normalise_id <- function(x) stringr::str_replace_all(x, "/", "")
 
 read_interproscan <- function(path, cfg, seqtype = "p") {
+  if (!identical(seqtype, "p")) {
+    stop("nucleotide input (-t n / --seqtype n) was retired; translate sequences to protein FASTA first",
+         call. = FALSE)
+  }
   ## quote = "" for the same reason as in 00_config.R: InterPro descriptions contain bare
   ## double quotes. IPR036390 is '"Winged helix" DNA-binding domain', and with readr's
   ## default quoting the quotes are silently stripped from column 6, so SSF46785 was named
@@ -39,9 +43,6 @@ read_interproscan <- function(path, cfg, seqtype = "p") {
   out <- raw %>%
     mutate(
       seqname = normalise_id(seqname),
-      ## For --nucleic, InterProScan reports <nucleotide_id>_<orf_id>.
-      seqname = if (seqtype == "n") stringr::str_extract(seqname, "^(.*)(?=_orf)") %>%
-                                    dplyr::coalesce(seqname) else seqname,
       ipr_entry = dplyr::na_if(ipr_entry, "-"),
       ipr_desc  = dplyr::na_if(ipr_desc, "-"),
       sig_desc  = dplyr::na_if(sig_desc, "-"),
@@ -199,5 +200,134 @@ read_nbarc_hmm <- function(path, domain_ga = NBARC_HMM_DOMAIN_GA) {
   ) %>%
     filter(!is.na(start), !is.na(end), !is.na(score), score >= domain_ga) %>%
     mutate(completeness = round((hmm_to - hmm_from + 1) / NBARC_HMM_LENGTH, 3)) %>%
+    arrange(seqname, start, end)
+}
+
+## Evidence-based split NB-ARC HMM envelope joining.
+##
+## hmmsearch reports one NB-ARC as two envelopes when an insertion interrupts the
+## alignment (for example Rpp4C4). Two consecutive envelopes A then B on one protein
+## join when all five conditions hold:
+##   1. model carries on:      B$hmm_from >= A$hmm_to - 1
+##   2. model does not repeat: B$hmm_from > A$hmm_from
+##   3. protein non-overlap:   B$start > A$end
+##   4. gap is empty:          no unrelated domain contained in [A$end + 1, B$start - 1]
+##   5. corroboration:         a FIMO NB-ARC motif run spans the gap, OR a signature-
+##                             derived NBARC/NACHT domain spans the gap, OR the gap
+##                             is <= NBARC_MAX_UNCORROBORATED_INSERT (30 aa backstop).
+## Chains are bounded so total model span <= NBARC_HMM_LENGTH and total backstop-only
+## gap <= NBARC_MAX_UNCORROBORATED_INSERT.
+NBARC_MAX_UNCORROBORATED_INSERT <- 30L
+NBARC_GAP_IGNORE <- c("NBARC", "NACHT", "PLOOP", "nbarc-motif",
+                      "Winged-helix", "nacht-winged-helix")
+NBARC_SPANNING_CLASSES <- c("NBARC", "NACHT")
+
+nbarc_join_basis <- function(prev, row, seq_domains, seq_motifs) {
+  if (is.null(prev) || !identical(prev$seqname, row$seqname)) return(NA_character_)
+  if (is.na(prev$hmm_to) || is.na(row$hmm_from) ||
+      is.na(prev$hmm_from) || is.na(row$hmm_to)) return(NA_character_)
+  if (row$hmm_from < prev$hmm_to - 1L) return(NA_character_)
+  if (row$hmm_from <= prev$hmm_from)  return(NA_character_)
+  if (row$start <= prev$end)          return(NA_character_)
+  if (max(prev$hmm_to, row$hmm_to) - prev$hmm_from + 1L > NBARC_HMM_LENGTH) {
+    return(NA_character_)
+  }
+
+  gap_start <- prev$end + 1L
+  gap_end   <- row$start - 1L
+  if (!is.null(seq_domains) && nrow(seq_domains) > 0L && gap_end >= gap_start) {
+    unrelated <- !(seq_domains$domain_class %in% NBARC_GAP_IGNORE)
+    if (any(unrelated & seq_domains$start >= gap_start & seq_domains$end <= gap_end)) {
+      return(NA_character_)
+    }
+  }
+
+  if (!is.null(seq_motifs) && nrow(seq_motifs) > 0L) {
+    if (any(seq_motifs$start <= prev$end & seq_motifs$end >= row$start)) {
+      return("motif")
+    }
+  }
+  if (!is.null(seq_domains) && nrow(seq_domains) > 0L) {
+    if (any(seq_domains$domain_class %in% NBARC_SPANNING_CLASSES &
+            seq_domains$start <= prev$end & seq_domains$end >= row$start)) {
+      return("signature")
+    }
+  }
+
+  gap <- gap_end - gap_start + 1L
+  if (prev$uncorroborated_insert + gap <= NBARC_MAX_UNCORROBORATED_INSERT) {
+    return("backstop")
+  }
+  NA_character_
+}
+
+join_split_nbarc <- function(rows, domains = NULL, motif_runs = NULL) {
+  if (is.null(rows) || nrow(rows) == 0L) return(rows)
+  rows <- rows %>%
+    arrange(seqname, start, end) %>%
+    mutate(join_basis = NA_character_, joined_from = 1L)
+  if (nrow(rows) <= 1L) return(rows)
+
+  counts <- rows %>% count(seqname)
+  multi_seqs <- counts$seqname[counts$n > 1L]
+  if (length(multi_seqs) == 0L) return(rows)
+
+  singles <- rows %>% filter(!(seqname %in% multi_seqs))
+  multis  <- rows %>% filter(seqname %in% multi_seqs)
+
+  dom_by_seq <- if (!is.null(domains) && nrow(domains) > 0L) {
+    d_sub <- domains %>% filter(seqname %in% multi_seqs)
+    if (nrow(d_sub) > 0L) split(d_sub, d_sub$seqname) else list()
+  } else list()
+
+  mot_by_seq <- if (!is.null(motif_runs) && nrow(motif_runs) > 0L) {
+    m_sub <- motif_runs %>% filter(seqname %in% multi_seqs)
+    if (nrow(m_sub) > 0L) split(m_sub, m_sub$seqname) else list()
+  } else list()
+
+  multi_split <- split(multis, multis$seqname)
+  joined_list <- lapply(names(multi_split), function(sid) {
+    df <- multi_split[[sid]]
+    sd <- dom_by_seq[[sid]]
+    sm <- mot_by_seq[[sid]]
+    acc <- vector("list", nrow(df))
+    k <- 0L
+    for (i in seq_len(nrow(df))) {
+      row <- as.list(df[i, , drop = FALSE])
+      row$uncorroborated_insert <- 0L
+      if (k == 0L) {
+        k <- 1L
+        acc[[1L]] <- row
+        next
+      }
+      prev <- acc[[k]]
+      basis <- nbarc_join_basis(prev, row, sd, sm)
+      if (is.na(basis)) {
+        k <- k + 1L
+        acc[[k]] <- row
+      } else {
+        gap <- row$start - prev$end - 1L
+        prev$end <- max(prev$end, row$end)
+        prev$hmm_to <- max(prev$hmm_to, row$hmm_to)
+        prev$score <- prev$score + row$score
+        prev$completeness <- round((prev$hmm_to - prev$hmm_from + 1L) / NBARC_HMM_LENGTH, 3)
+        if (identical(basis, "backstop")) {
+          prev$uncorroborated_insert <- prev$uncorroborated_insert + gap
+        }
+        seen <- if (is.na(prev$join_basis) || !nzchar(prev$join_basis)) character() else
+          strsplit(prev$join_basis, ",", fixed = TRUE)[[1]]
+        if (!(basis %in% seen)) seen <- c(seen, basis)
+        prev$join_basis <- paste(seen, collapse = ",")
+        prev$joined_from <- prev$joined_from + 1L
+        acc[[k]] <- prev
+      }
+    }
+    dplyr::bind_rows(lapply(acc[seq_len(k)], function(x) {
+      x$uncorroborated_insert <- NULL
+      tibble::as_tibble(x)
+    }))
+  })
+
+  dplyr::bind_rows(singles, dplyr::bind_rows(joined_list)) %>%
     arrange(seqname, start, end)
 }

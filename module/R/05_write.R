@@ -209,8 +209,60 @@ write_itol <- function(domains_tbl, template, path, dedup_map = NULL) {
   write_lines_out(c(readr::read_lines(template, progress = FALSE), body), path)
 }
 
+## iTOL strips keyed on the tips of phylogeny/NB-ARC.rooted.tree, matching
+## region_fasta()'s "_(copy)" numbering and appending the scaffold tips.
+write_itol_tree <- function(domains_tbl, regions, template, path, reference_itol = NULL) {
+  colour_of <- c(R1 = "#FBB4AE", CC = "#B3CDE3", RPW8 = "#CCEBC5", TIR = "#DECBE4",
+                 PLOOP = "#FFFFCC", `NB-ARC` = "#FED9A6", LRR = "#E5D8BD",
+                 `C-JID` = "#FDDAEC", MLKL = "#CCEBC5", ID = "#666666")
+  shape_of  <- c(R1 = "HH", CC = "OC", RPW8 = "OC", TIR = "OC", PLOOP = "RE",
+                 `NB-ARC` = "RE", LRR = "EL", `C-JID` = "HH", MLKL = "OC", ID = "HH")
+
+  strips <- domains_tbl %>%
+    filter(type == "REGION") %>%
+    mutate(colour = dplyr::coalesce(unname(colour_of[description]), "#666666"),
+           shape  = dplyr::coalesce(unname(shape_of[description]), "HH"),
+           piece  = paste0(shape, "|", start, "|", end, "|", colour, "|", description)) %>%
+    arrange(seqname, start) %>%
+    group_by(seqname) %>%
+    summarise(attribute = paste(piece, collapse = ","), .groups = "drop")
+
+  lengths <- domains_tbl %>%
+    filter(type == "CHAIN") %>%
+    select(seqname, len = end) %>%
+    distinct(seqname, .keep_all = TRUE)
+
+  tips <- regions %>%
+    filter(region == "NB-ARC") %>%
+    arrange(seqname, start) %>%
+    group_by(seqname) %>%
+    mutate(copy = dplyr::row_number(), n_copy = dplyr::n()) %>%
+    ungroup() %>%
+    mutate(tip = dplyr::if_else(n_copy == 1L, seqname, paste0(seqname, "_(", copy, ")"))) %>%
+    select(seqname, tip)
+
+  rows <- tips %>%
+    inner_join(lengths, by = "seqname") %>%
+    inner_join(strips, by = "seqname") %>%
+    mutate(line = paste0(tip, ",", len, ",", attribute))
+
+  body <- rows$line
+  if (!is.null(reference_itol) && nzchar(reference_itol) && file.exists(reference_itol)) {
+    ref_lines <- readr::read_lines(reference_itol, progress = FALSE)
+    ref_lines <- ref_lines[nzchar(ref_lines) & !startsWith(ref_lines, "#")]
+    if (length(ref_lines) > 0L) {
+      ref_tips <- sub(",.*$", "", ref_lines)
+      ref_lines <- ref_lines[!(ref_tips %in% rows$tip)]
+      body <- c(body, ref_lines)
+    }
+  }
+
+  write_lines_out(c(readr::read_lines(template, progress = FALSE), body), path)
+  invisible(nrow(rows))
+}
+
 write_all <- function(outdir, classification, domains, regions, annotation, aa,
-                      cfg, dropped, meta, itol_template) {
+                      cfg, dropped, meta, itol_template, reference_itol = NULL) {
   ## Own the output tree here so the R stage also works when driven directly,
   ## not only through NLRtracker.sh.
   for (d in c("figures", file.path("figures", "by_subclass"), "sequences",
@@ -279,6 +331,9 @@ write_all <- function(outdir, classification, domains, regions, annotation, aa,
                file.path(anndir, "iTOL.txt"))
     write_itol(domains_tbl %>% filter(seqname %in% nlr), itol_template,
                file.path(anndir, "iTOL_dedup.txt"), dedup_map = dedup_map)
+    write_itol_tree(domains_tbl, regions, itol_template,
+                    file.path(anndir, "iTOL_tree.txt"),
+                    reference_itol = reference_itol)
   }
 
   write_run_info(file.path(outdir, "run_info.yaml"), meta)

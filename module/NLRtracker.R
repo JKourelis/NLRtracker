@@ -62,6 +62,10 @@ message("[R]   ", nrow(cfg$signatures), " signatures across ",
         nrow(cfg$classes), " classes; ", nrow(cfg$rules), " multi-signature rule(s)")
 
 seqtype <- opt("seqtype", "p")
+if (!identical(seqtype, "p")) {
+  stop("nucleotide input (--seqtype n) was retired; translate sequences to protein FASTA first",
+       call. = FALSE)
+}
 message("[R] parsing InterProScan 6 TSV")
 ips <- read_interproscan(need_arg("interproscan"), cfg, seqtype = seqtype)
 message("[R]   ", nrow(ips), " matches over ", dplyr::n_distinct(ips$seqname), " proteins")
@@ -143,7 +147,8 @@ meta <- list(
 
 res <- write_all(outdir, classification, domains_kept, regions, annotation, aa,
                  cfg, reg$dropped, meta,
-                 itol_template = file.path(here, "iTOL_NLR_template.txt"))
+                 itol_template = file.path(here, "iTOL_NLR_template.txt"),
+                 reference_itol = file.path(here, "reference", "NB-ARC_region.reference.itol"))
 
 message("[R] drawing figures")
 draw_all_figures(res$domains_tbl, outdir, res$nlr, res$assoc)

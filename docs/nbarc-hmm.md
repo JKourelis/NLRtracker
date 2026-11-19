@@ -1,132 +1,69 @@
 # The NB-ARC region model
 
-`module/reference/NB-ARC_region.hmm` defines the NB-ARC region. InterPro signatures still contribute
-evidence for classification, but the **boundaries** of the region come from this model.
+`module/reference/NB-ARC_region.hmm` defines NB-ARC region coordinates. InterPro signatures supply domain and lineage classification evidence, while this profile sets the boundaries of every `NB-ARC` region in `Domains.tsv` and `sequences/NBARC.fasta`.
 
-The model is locked. `module/reference/NB-ARC_region.LOCK` records its checksum, and
-`tests/run_tests.sh` fails if the file changes. Rebuilding it changes every NB-ARC coordinate the
-tool has ever emitted, so it must be a deliberate, versioned act.
+The model (`LENG 382`) is locked. `module/reference/NB-ARC_region.LOCK` records its SHA-256 checksum, and `tests/run_tests.sh` fails if the HMM file changes.
 
----
+## 1. Why a full-length model is used instead of `PF00931`
 
-## Why not Pfam PF00931
+Pfam `PF00931` (`NB-ARC`) is shorter than a complete plant NB-ARC and sits close to its gathering threshold (`GA 23.5`) on divergent NLRs:
 
-PF00931 is the obvious candidate and is the wrong one, for two measured reasons.
+- **Partial coverage:** `PF00931` had model length `175` aa in Pfam `38.2` (`InterPro 109.0`) and shortened to `152` aa in Pfam `39.0` (`InterPro 111.0`), whereas full NB-ARC regions (NBD, HD1, and WHD segments) have a RefPlantNLR median length of **356 aa** (`n = 508`, p25 = `336`, p75 = `361`, max = `424`).
+- **Divergent receptor sensitivity:** Under Pfam `38.2`, the divergent TIR-NLR outgroup (`TNP`) scored `26.0` to `26.1` against `GA 23.5` (compared to `72` to `89` against `NB-ARC_region.hmm`). Under Pfam `39.0` (`PF00931.30`), `TN2` drops below gathering threshold so `Status` calls `degenerate NLR`, while `NB-ARC_region.hmm` still recovers its `NB-ARC` region (`168–374`).
 
-**It covers about half the region.** PF00931 has `LENG 175`. The NB-ARC regions this tool defines have
-a median length of **356 aa** (n = 508, p25 = 336, p75 = 361, max = 424). The NB-ARC is
-NBD-HD1-WHD; aligning to PF00931 discards the HD1 and WHD parts that the definition exists to
-capture.
+## 2. Model construction and thresholds
 
-**It sits on a detection cliff.** PF00931's curated gathering threshold is `GA 23.5`. Against it:
+1. Seed: `467` RefPlantNLR NB-ARC regions of at least `300` aa plus `4` `TNP` outgroup regions (`471` total).
+2. Alignment: `mafft --auto` once at build time (`module/reference/NB-ARC_region.seed.aln`). `mafft` is not a runtime dependency.
+3. Profile: `hmmbuild --amino -n NB-ARC_region` -> `NB-ARC_region.hmm` (`LENG 382`).
 
-| Sequence | Best-domain score |
-|---|---:|
-| ZAR1 | 197 |
-| Rx | 143 |
-| MLA1 | 112 |
-| Roq1 | 83 |
-| RPS4 | 64 |
-| divergent TIR-NLR outgroup | **26.0 to 26.1** |
+Two calibrated score cutoffs separate NLR detection from domain boundary placement:
 
-The outgroup passes by 2.5 bits. Anything slightly more divergent falls below GA and disappears
-entirely. A model built from full-length NB-ARC regions removes that cliff.
+| Parameter | Score | Purpose | Empirical basis |
+|---|---:|---|---|
+| `NBARC_HMM_PROTEIN_GA` | 40 | Accepts an HMM-only protein as NLR-like | Minimum RefPlantNLR score is `40.7`; CDC48 and AAA+ ATPases peak at `15.8` |
+| `NBARC_HMM_DOMAIN_GA` | 20 | Keeps partial NB-ARC copies inside an NLR | Recovers `RRS1` partial second NB-ARC (`1068–1187`, score `36`) |
 
----
+HMM-only candidates (hits not covered by a member-database NB-ARC signature) also require corroborating NLR evidence from `NBARC_NLR_SUPPORT` and zero hits in `NBARC_EXCLUDE_SUPPORT` (`AAA+`/`CDC48` signatures in `module/R/03_regions.R`). Completeness is reported as `(hmm_to - hmm_from + 1) / 382`.
 
-## How it was built
+## 3. Handling duplicated, partial, and split NB-ARCs
 
-```
-1. seed  = RefPlantNLR NB-ARC regions >= 300 aa (467 of 508) + the outgroup regions
-2. MSA   = mafft, once
-3. HMM   = hmmbuild  ->  module/reference/NB-ARC_region.hmm     (LENG 382)
-4. lock  = sha256 into NB-ARC_region.LOCK
-```
+### Adjacent envelopes are trimmed rather than merged
 
-Regions under 100 aa were excluded from the seed; a fragment would distort the model. `mafft` ran
-once, at build time, and is **not** a runtime dependency. `NB-ARC_region.seed.aln` is the alignment
-that produced the model, so the build is auditable without re-running anything.
+When two HMM envelopes overlap on a protein (`Bph1/9-1` partial copy `138–388` and complete copy `381–768`), the earlier envelope ends at `next_start - 1`. Verified multi-NB-ARC controls asserted by `tests/run_tests.sh --full`:
 
-Everything after step 3 is profile alignment (`hmmalign`), which is deterministic and does not shift
-when the query set changes. That is what makes coordinates and clade assignments stable across
-proteomes.
-
----
-
-## Calibrated thresholds
-
-Two thresholds, both set from data rather than chosen:
-
-| Threshold | Value | Basis |
+| Protein | NB-ARC regions | Biological nature |
 |---|---:|---|
-| `NBARC_HMM_PROTEIN_GA` | 40 | the lowest-scoring genuine RefPlantNLR NLR scores 40.7 |
-| `NBARC_HMM_DOMAIN_GA` | 20 | RRS1's partial second NB-ARC scores 36; a domain floor below that keeps it |
+| `Bph1/9-1`, `Bph1/9-2`, `Bph1/9-7`, `Bph1/9-9`, `Pib`, `RGA2` | 2 | Genuine partial duplication |
+| `Prv^1`, `Prv^2`, `RPP2A` | 2 | Genuine tandem NB-ARC |
+| `RRS1-R` | 2 | Second partial NB-ARC recovered at score `36` |
+| `Pi2` | 1 | Stray LRR-embedded motif excluded from forming a second NB-ARC |
 
-The protein threshold decides whether a protein is NLR-like at all. The domain threshold decides
-whether an individual match becomes a region. They are separate because a genuine partial domain
-scores well below a genuine full-length one.
+### Evidence-based joining of interrupted envelopes (`2.0.3`)
 
-`completeness` is reported per region as `(hmm_to - hmm_from + 1) / 382`, so a partial is visible in
-the output rather than silently indistinguishable from a complete one.
+`hmmsearch` occasionally splits a single NB-ARC across an insertion (for example `Rpp4C4`, which hits model positions `27–148` at `142–286` and `147–373` at `312–554`). `join_split_nbarc()` in `module/R/01_parse.R` runs inside `build_regions()` right before `apply_hmm_nbarc()` and joins consecutive envelopes `A` then `B` when all five conditions hold:
 
----
+1. The model continues: `B$hmm_from >= A$hmm_to - 1`.
+2. The model does not restart: `B$hmm_from > A$hmm_from` (separating insertions from tandem copies).
+3. Protein coordinates do not overlap: `B$start > A$end`.
+4. No unrelated domain is contained inside the gap `[A$end + 1, B$start - 1]` (ignoring `NBARC`, `NACHT`, `PLOOP`, `nbarc-motif`, `Winged-helix`, and `nacht-winged-helix`).
+5. At least one corroboration rule fires: a canonical FIMO NB-ARC motif run spans the gap (strongest), a signature-derived `NBARC` or `NACHT` domain spans the gap, or the total uncorroborated backstop gap across the chain is at most `30` residues.
 
-## What the model changed
+Joined chains must also stay within `382` model positions (`max_hmm_to - min_hmm_from + 1 <= 382`). On RefPlantNLR, `Rpp4C4` joins on motif continuity into one `NB-ARC` region, while all tandem and partial duplications stay separate.
 
-Applied across RefPlantNLR and two proteomes:
+### Motif hits extend regions without creating them
 
-- **478 / 249 / 1003** NB-ARC boundaries replaced by HMM envelope coordinates
-- **2 / 9 / 13** proteins gained an NB-ARC region that signatures had missed
-- **1 / 8 / 16** candidate matches rejected below threshold
+Isolated FIMO motif hits cannot create an `NB-ARC` region on their own, preventing stray 15-aa artefacts inside LRR repeats (`Pi2`, `Pi9`, `PigmR`, `PigmS`, `Piz-t`).
 
-Classification agreement with the 481 published RefPlantNLR subclasses did not move: 457 exact,
-23 honestly ambiguous, 1 wrong.
+## 4. Reference phylogeny scaffold
 
-### Partial and duplicated NB-ARCs
+`module/reference/NB-ARC_region.reference.fasta` and `module/reference/NB-ARC_region.reference.itol` hold `500` NB-ARC regions extracted under InterPro `111.0` from the `481` published RefPlantNLR proteins (`496` regions, including `Pb1`, `RXL`, and all tandem/partial pairs such as `RRS1-R_(1)` and `RRS1-R_(2)`) plus the `4` `TNP` outgroup proteins. `module/nlr_clades.tsv` defines `23` active clades (`1` outgroup plus `22` anchored clades).
 
-Partial NB-ARCs are biologically real, so there is no length filter. Two rules protect them:
+## 5. Rebuilding the model
 
-**Adjacent envelopes are trimmed, never merged.** Where two HMM envelopes overlap, the earlier one
-ends at `next_start - 1`. Without this, a tandem pair fuses into one region. Verified survivors:
+Keep the model locked unless a major release explicitly intends to shift coordinates:
 
-| Protein | NB-ARC regions | Nature |
-|---|---:|---|
-| `Bph1/9-1`, `Bph1/9-2`, `Bph1/9-7`, `Bph1/9-9`, `Pib`, `RGA2` | 2 | genuine partial duplication |
-| `Prv^1`, `Prv^2`, `RPP2A` | 2 | genuine tandem |
-| `RRS1-R` | 2 | second copy partial, invisible to signatures, recovered by the model |
-
-**A region needs domain evidence to exist.** Motif hits may extend a region but never create one.
-This removes eight spurious 15 aa "NB-ARC regions", each traceable to a single stray FIMO hit, for
-example the `RNBS-C` hit inside an LRR repeat region in `Pi2`, `Pi9`, `PigmR`, `PigmS` and `Piz-t`.
-Length was the wrong filter for this: a stray motif is noise at any length, and a genuine partial is
-real at any length.
-
-The test suite asserts all four cases.
-
----
-
-## Sequences that are NB-ARC-like but not NLRs
-
-The model finds P-loop NTPases outside the NLR family, as any NB-ARC model will. Of 23 candidates
-detected by the model but not by any NLR signature:
-
-- **9** carry genuine independent NLR evidence (scores 56.6 to 132.3)
-- **6** are CDC48 / AAA+ ATPases (scores 12.4 to 15.8), well below the protein threshold
-- **8** remain unclear
-
-The score separation between the two confident groups is what `NBARC_HMM_PROTEIN_GA = 40` sits in.
-Support lists in `module/R/03_regions.R` (`NBARC_NLR_SUPPORT`, `NBARC_EXCLUDE_SUPPORT`) name the
-signature classes that confirm or veto an HMM-only call.
-
----
-
-## Rebuilding it
-
-Do not, unless a release intends to. If it must happen:
-
-1. Regenerate the seed from the current NB-ARC regions.
-2. `mafft` and `hmmbuild` as above.
-3. Recalibrate both thresholds against RefPlantNLR. They are properties of the model, not constants.
-4. Update `NB-ARC_region.LOCK` with the new checksum.
-5. Re-run the test suite. Treat any movement in 457 / 23 / 1 as a finding to explain,
-   not a number to update.
+1. Regenerate the seed alignment from curated full-length NB-ARC regions.
+2. Run `mafft` and `hmmbuild`, recalibrating `NBARC_HMM_PROTEIN_GA` and `NBARC_HMM_DOMAIN_GA` on RefPlantNLR.
+3. Update `module/reference/NB-ARC_region.LOCK` with the new SHA-256 digest.
+4. Run `tests/run_tests.sh --full` and explain any shift in the `457 / 23 / 1` RefPlantNLR benchmark.
