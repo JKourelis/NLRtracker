@@ -267,6 +267,7 @@ If you use NLRtracker, please cite:
 - Retired `-t n` nucleotide input cleanly.
 - Backported evidence-based split NB-ARC HMM envelope joining (FIMO motif order, spanning signature, and 30-residue gap backstop; joins `Rpp4C4` into one NB-ARC region).
 - Fixed phylogeny handling: honoured `FastTree` fallback, normalised `/` and `_(n)` tip/anchor lookups, raised `PHYLO_ANCHOR_QUORUM` to `1.00`, retained query proteins matching scaffold IDs, wrote `NB-ARC.rooted.tree`, protected `TNP` outgroups (`outgroup` category), keyed `annotations/iTOL_tree.txt` on tree tips, updated `module/nlr_clades.tsv` to `23` active clades (`DAR5` in `CCR-NRG1`, nested parents), and regenerated the 500-region scaffold.
+- Passed `-double-precision` to `VeryFastTree` in `module/R/08_phylogeny.R` to prevent 32-bit `PairLogLk` hangs on large alignments, and surfaced `stderr` diagnostics on tree-builder failure.
 - Removed dead `support` column selection in `module/R/07_report.R` and removed committed `.Rhistory` and legacy InterPro `5.53-87.0.list`.
 
 ### 2.0.2

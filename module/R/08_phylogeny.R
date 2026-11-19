@@ -113,18 +113,32 @@ newick_label <- function(x) {
 ## The whole saving is about 1.2 seconds, against a tree that changes between runs and is
 ## poorly resolved. Clade assignment survived the difference, because the quorum rule tolerates
 ## local rearrangement, but a tree that cannot be reproduced is not one to publish a figure from.
+##
+## `-double-precision` is passed to VeryFastTree because 32-bit single precision can hang in
+## `PairLogLk -- numerical problem!` on large alignments while remaining reproducible at
+## `-threads 1`. Stderr is captured to a temporary log so failures surface diagnostics.
 build_tree <- function(aln, out_tree, threads = 1) {
   prog <- if (nzchar(Sys.which("VeryFastTree"))) "VeryFastTree" else
           if (nzchar(Sys.which("FastTree"))) "FastTree" else ""
   if (!nzchar(prog)) stop("neither VeryFastTree nor FastTree found", call. = FALSE)
   args <- if (prog == "VeryFastTree") {
-    c("-lg", "-gamma", "-pseudo", "-quiet", "-threads", threads, shQuote(aln))
+    c("-double-precision", "-lg", "-gamma", "-pseudo", "-quiet", "-threads", threads, shQuote(aln))
   } else {
     c("-lg", "-gamma", "-pseudo", "-quiet", shQuote(aln))
   }
-  st <- system2(prog, args, stdout = out_tree, stderr = FALSE)
+  err_log <- tempfile("tree_build_", fileext = ".stderr.log")
+  on.exit(unlink(err_log), add = TRUE)
+  st <- system2(prog, args, stdout = out_tree, stderr = err_log)
   if (!identical(st, 0L) || !file.exists(out_tree) || file.size(out_tree) == 0) {
-    stop(prog, " failed", call. = FALSE)
+    err_txt <- if (file.exists(err_log)) readLines(err_log, warn = FALSE) else character()
+    err_txt <- err_txt[nzchar(trimws(err_txt))]
+    detail <- if (length(err_txt)) {
+      tail_str <- paste(utils::tail(err_txt, 10L), collapse = " | ")
+      if (nchar(tail_str) > 400L) substr(tail_str, nchar(tail_str) - 399L, nchar(tail_str)) else tail_str
+    } else ""
+    msg <- paste0(prog, " failed (exit ", st, ")")
+    if (nzchar(detail)) msg <- paste0(msg, ": ", detail)
+    stop(msg, call. = FALSE)
   }
   out_tree
 }
